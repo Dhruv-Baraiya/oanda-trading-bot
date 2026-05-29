@@ -1,0 +1,32 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile
+    container_name: trading-backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file:
+      - .env.production
+    depends_on:
+      mongodb:
+        condition: service_started
+    networks:
+      - trading-net
+
+  mongodb:
+    image: mongo:7
+    container_name: trading-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - trading-net
+
+volumes:
+  mongodb_data:
+
+networks:
+  trading-net:
+    driver: bridge
