@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: trading-bot-backend
+    runtime: node
+    region: singapore
+    plan: free
+    rootDir: packages/backend
+    buildCommand: npm install && npm run build
+    startCommand: node dist/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: OANDA_API_TOKEN
+        sync: false
+      - key: OANDA_ACCOUNT_ID
+        sync: false
+      - key: OANDA_BASE_URL
+        value: https://api-fxpractice.oanda.com
+      - key: MONGODB_URI
+        sync: false
