@@ -11,7 +11,11 @@ export interface PriceUpdate {
 
 let socket: Socket | null = null;
 
-const BACKEND_URL = import.meta.env.DEV ? 'http://localhost:3001' : window.location.origin;
+// Use the backend URL from env, stripping any /api suffix (socket.io connects at origin)
+const rawUrl = import.meta.env.VITE_BACKEND_URL || '';
+const BACKEND_URL = rawUrl
+  ? rawUrl.replace(/\/api\/?$/, '')
+  : window.location.origin;
 
 export function getSocket(): Socket {
   if (!socket) {
