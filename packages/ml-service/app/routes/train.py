@@ -12,9 +12,9 @@ _training_thread = None
 class TrainRequest(BaseModel):
     instrument: str = "EUR_USD"
     train_start: str = "2019-01-01"
-    train_end: str = "2022-12-31"
-    val_start: str = "2023-01-01"
-    val_end: str = "2023-06-30"
+    train_end: str = "2025-12-31"
+    val_start: str = "2026-01-01"
+    val_end: str = "2026-12-31"
     version: str = "v1"
 
 
