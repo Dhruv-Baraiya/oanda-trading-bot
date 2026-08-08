@@ -20,3 +20,16 @@ services:
         value: https://api-fxpractice.oanda.com
       - key: MONGODB_URI
         sync: false
+      - key: ML_SERVICE_URL
+        value: https://trading-bot-ml.onrender.com
+
+  - type: web
+    name: trading-bot-ml
+    runtime: docker
+    region: singapore
+    plan: free
+    rootDir: packages/ml-service
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: MONGODB_URI
+        sync: false
