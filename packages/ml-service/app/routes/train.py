@@ -20,6 +20,10 @@ class TrainRequest(BaseModel):
 
 @router.post("/train")
 def start_training(req: TrainRequest):
+    import os
+    if os.getenv("INFERENCE_ONLY") == "1":
+        return {"error": "Training disabled on this instance (INFERENCE_ONLY=1). Train locally and weights sync via MongoDB."}
+
     global _training_thread, _pipeline
 
     if _pipeline.get_status()["state"] == "training":

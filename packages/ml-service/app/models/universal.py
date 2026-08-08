@@ -53,11 +53,34 @@ def build_universal_model(feature_count: int = 49, lookback: int = 60) -> keras.
 def load_universal_model(version: str = "latest") -> keras.Model | None:
     path = os.path.join(MODEL_DIR, f"universal-{version}.weights.h5")
     meta_path = os.path.join(MODEL_DIR, f"universal-{version}.meta.npy")
-    if not os.path.exists(path) or not os.path.exists(meta_path):
+
+    if os.path.exists(path) and os.path.exists(meta_path):
+        meta = np.load(meta_path, allow_pickle=True).item()
+        model = build_universal_model(feature_count=meta["feature_count"], lookback=meta["lookback"])
+        model.load_weights(path)
+        return model
+
+    return _load_from_mongo(version)
+
+
+def _load_from_mongo(version: str) -> keras.Model | None:
+    from app.data.mongo_client import get_collection
+    import tempfile
+
+    doc = get_collection("ml_models").find_one({"name": f"universal-{version}"})
+    if not doc:
         return None
-    meta = np.load(meta_path, allow_pickle=True).item()
+
+    meta = doc["meta"]
     model = build_universal_model(feature_count=meta["feature_count"], lookback=meta["lookback"])
-    model.load_weights(path)
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".weights.h5", delete=False)
+    tmp.write(doc["weights"])
+    tmp.close()
+    model.load_weights(tmp.name)
+    os.unlink(tmp.name)
+
+    print(f"[ML] Loaded universal-{version} from MongoDB")
     return model
 
 
@@ -68,7 +91,33 @@ def save_universal_model(model: keras.Model, version: str):
     input_shape = model.input_shape
     meta = {"feature_count": input_shape[2], "lookback": input_shape[1]}
     np.save(os.path.join(MODEL_DIR, f"universal-{version}.meta.npy"), meta)
+
     latest_w = os.path.join(MODEL_DIR, "universal-latest.weights.h5")
     model.save_weights(latest_w)
     np.save(os.path.join(MODEL_DIR, "universal-latest.meta.npy"), meta)
+
+    _save_to_mongo(path, meta, version)
+    if version != "latest":
+        _save_to_mongo(latest_w, meta, "latest")
+
     return path
+
+
+def _save_to_mongo(weights_path: str, meta: dict, version: str):
+    from app.data.mongo_client import get_collection
+    from datetime import datetime
+
+    with open(weights_path, "rb") as f:
+        weights_bin = f.read()
+
+    get_collection("ml_models").update_one(
+        {"name": f"universal-{version}"},
+        {"$set": {
+            "name": f"universal-{version}",
+            "weights": weights_bin,
+            "meta": meta,
+            "updated_at": datetime.utcnow(),
+        }},
+        upsert=True,
+    )
+    print(f"[ML] Saved universal-{version} to MongoDB ({len(weights_bin)} bytes)")
