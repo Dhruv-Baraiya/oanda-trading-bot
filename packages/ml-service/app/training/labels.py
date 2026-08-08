@@ -42,13 +42,12 @@ def generate_direction_labels(
     return directions[:valid], magnitudes[:valid]
 
 
-def generate_specialist_labels(trades: list[dict]) -> tuple[np.ndarray, np.ndarray]:
-    """Generate confidence and size labels from trade outcomes."""
+def generate_specialist_labels_from_trades(trades: list[dict]) -> tuple[np.ndarray, np.ndarray]:
+    """Generate confidence and size labels from actual trade outcomes."""
     confidence = []
     sizes = []
 
     for t in trades:
-        pl = t.get("pl", 0)
         sl = t.get("stopLoss", 0)
         tp = t.get("takeProfit", 0)
         entry = t.get("entryPrice", 0)
@@ -61,7 +60,6 @@ def generate_specialist_labels(trades: list[dict]) -> tuple[np.ndarray, np.ndarr
         exit_price = t.get("exitPrice", entry)
         expected_pips = abs(tp - entry) if tp else abs(sl - entry)
 
-        # Confidence: 1.0 if hit TP, 0.0 if hit SL
         if tp and abs(exit_price - tp) < 0.0001:
             confidence.append(1.0)
         elif sl and abs(exit_price - sl) < 0.0001:
@@ -69,9 +67,80 @@ def generate_specialist_labels(trades: list[dict]) -> tuple[np.ndarray, np.ndarr
         else:
             confidence.append(0.5)
 
-        # Size: actual P/L vs expected, clamped [0.5, 2.0]
         actual_pips = abs(exit_price - entry)
         ratio = actual_pips / expected_pips if expected_pips > 0 else 1.0
         sizes.append(max(0.5, min(2.0, ratio)))
 
     return np.array(confidence), np.array(sizes)
+
+
+def generate_specialist_labels_synthetic(
+    h1: pd.DataFrame,
+    horizon: int = 6,
+    sl_atr_mult: float = 1.5,
+    tp_ratio: float = 2.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Generate synthetic confidence/size labels by simulating trades on each candle."""
+    close = h1["close"].values
+    high = h1["high"].values
+    low = h1["low"].values
+
+    tr = np.maximum(
+        high - low,
+        np.maximum(np.abs(high - np.roll(close, 1)), np.abs(low - np.roll(close, 1))),
+    )
+    atr = pd.Series(tr).rolling(14).mean().values
+
+    n = len(close)
+    confidence = np.full(n, 0.5)
+    optimal_size = np.full(n, 0.5)
+
+    for i in range(14, n - horizon):
+        if atr[i] <= 0:
+            continue
+
+        sl_dist = atr[i] * sl_atr_mult
+        tp_dist = sl_dist * tp_ratio
+        entry = close[i]
+
+        # Simulate long trade
+        long_hit_tp = False
+        long_hit_sl = False
+        for j in range(1, horizon + 1):
+            if i + j >= n:
+                break
+            if high[i + j] >= entry + tp_dist:
+                long_hit_tp = True
+                break
+            if low[i + j] <= entry - sl_dist:
+                long_hit_sl = True
+                break
+
+        # Simulate short trade
+        short_hit_tp = False
+        short_hit_sl = False
+        for j in range(1, horizon + 1):
+            if i + j >= n:
+                break
+            if low[i + j] <= entry - tp_dist:
+                short_hit_tp = True
+                break
+            if high[i + j] >= entry + sl_dist:
+                short_hit_sl = True
+                break
+
+        # Best outcome determines confidence
+        if long_hit_tp or short_hit_tp:
+            confidence[i] = 1.0
+            move = abs(close[min(i + horizon, n - 1)] - entry)
+            optimal_size[i] = min(1.0, move / (atr[i] * 2)) + 0.5
+        elif long_hit_sl and short_hit_sl:
+            confidence[i] = 0.0
+            optimal_size[i] = 0.3
+        else:
+            move = abs(close[min(i + horizon, n - 1)] - entry)
+            confidence[i] = min(1.0, move / tp_dist) * 0.7 + 0.15
+            optimal_size[i] = 0.5
+
+    valid = n - horizon
+    return confidence[:valid], optimal_size[:valid]

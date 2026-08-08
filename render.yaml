@@ -21,7 +21,7 @@ services:
       - key: MONGODB_URI
         sync: false
       - key: ML_SERVICE_URL
-        value: https://trading-bot-ml.onrender.com
+        value: https://trading-bot-ml-hv3o.onrender.com
 
   - type: web
     name: trading-bot-ml

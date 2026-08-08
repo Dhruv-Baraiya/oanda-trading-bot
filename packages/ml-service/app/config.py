@@ -39,6 +39,6 @@ TRAINING_CONFIG = {
         "dense_units": 16,
         "batch_size": 32,
         "max_epochs": 80,
-        "loss_weights": {"confidence": 0.6, "size": 0.4},
+        "loss_weights": {"confidence": 0.6, "optimal_size": 0.4},
     },
 }
