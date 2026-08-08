@@ -51,9 +51,12 @@ export function createAutoTraderRoutes(autoTrader: AutoTrader): Router {
     }
   });
 
-  router.delete('/decisions', async (_req: Request, res: Response) => {
+  router.delete('/decisions', async (req: Request, res: Response) => {
     try {
-      const result = await DecisionLogModel.deleteMany({});
+      const type = req.query.type as string;
+      const filter: Record<string, any> = {};
+      if (type) filter.type = type;
+      const result = await DecisionLogModel.deleteMany(filter);
       res.json({ deleted: result.deletedCount });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
