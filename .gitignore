@@ -15,3 +15,8 @@ __pycache__/
 .vscode/
 *.swp
 *.swo
+venv/
+packages/ml-service/models/
+*.weights.h5
+*.meta.npy
+*.keras

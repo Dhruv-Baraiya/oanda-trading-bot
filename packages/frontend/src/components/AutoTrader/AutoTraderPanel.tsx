@@ -5,8 +5,10 @@ import {
   stopAutoTrader,
   fetchDecisionLogs,
   clearDecisionLogs,
+  fetchMLStatus,
   type AutoTraderStatus,
   type DecisionLog,
+  type MLStatus,
 } from '../../services/api';
 import { onAutoTraderStatus, onDecision } from '../../services/socket';
 
@@ -27,18 +29,24 @@ const TYPE_COLORS: Record<string, string> = {
 export function AutoTraderPanel() {
   const [status, setStatus] = useState<AutoTraderStatus | null>(null);
   const [decisions, setDecisions] = useState<DecisionLog[]>([]);
+  const [mlStatus, setMlStatus] = useState<MLStatus | null>(null);
   const [interval, setInterval_] = useState(60);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     fetchAutoTraderStatus().then(setStatus).catch(() => {});
     fetchDecisionLogs({ limit: 30 }).then(setDecisions).catch(() => {});
+    fetchMLStatus().then(setMlStatus).catch(() => {});
+
+    const mlPoll = window.setInterval(() => {
+      fetchMLStatus().then(setMlStatus).catch(() => {});
+    }, 10000);
 
     const unsub1 = onAutoTraderStatus(setStatus);
     const unsub2 = onDecision((d) => {
       setDecisions(prev => [d, ...prev].slice(0, 50));
     });
-    return () => { unsub1(); unsub2(); };
+    return () => { unsub1(); unsub2(); window.clearInterval(mlPoll); };
   }, []);
 
   const handleStart = async () => {
@@ -128,6 +136,75 @@ export function AutoTraderPanel() {
         </div>
       )}
 
+      {/* ML Status */}
+      <div style={{ ...styles.mlSection, borderTop: '1px solid #2a2a3e', paddingTop: 10, marginBottom: 12 }}>
+        <h4 style={{ margin: '0 0 8px', color: '#d1d4dc', fontSize: 13 }}>AI/ML Engine</h4>
+        {!mlStatus ? (
+          <div style={{ color: '#8a8a9a', fontSize: 11 }}>Loading...</div>
+        ) : !mlStatus.online ? (
+          <div style={{ color: '#ef5350', fontSize: 11 }}>ML Service Offline</div>
+        ) : (
+          <div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <span style={{
+                fontSize: 10, fontWeight: 'bold', padding: '2px 8px', borderRadius: 3,
+                background: mlStatus.model_loaded ? '#26a69a22' : '#ff980022',
+                color: mlStatus.model_loaded ? '#26a69a' : '#ff9800',
+              }}>
+                {mlStatus.model_loaded ? 'MODEL LOADED' : 'NO MODEL'}
+              </span>
+              <span style={{
+                fontSize: 10, fontWeight: 'bold', padding: '2px 8px', borderRadius: 3,
+                background: '#2196f322', color: '#2196f3',
+              }}>
+                {mlStatus.training?.state?.toUpperCase() || 'IDLE'}
+              </span>
+            </div>
+            {mlStatus.training && mlStatus.training.state !== 'idle' && (
+              <div style={{ background: '#0d1b3e', borderRadius: 4, padding: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ color: '#d1d4dc', fontSize: 11 }}>{mlStatus.training.message}</span>
+                  <span style={{ color: '#2196f3', fontSize: 11, fontWeight: 'bold' }}>{mlStatus.training.progress}%</span>
+                </div>
+                <div style={{ background: '#1a1a2e', borderRadius: 2, height: 6, overflow: 'hidden' }}>
+                  <div style={{
+                    background: mlStatus.training.state === 'complete' ? '#26a69a' :
+                      mlStatus.training.state === 'error' ? '#ef5350' : '#2196f3',
+                    height: '100%', width: `${mlStatus.training.progress}%`,
+                    transition: 'width 0.5s ease',
+                  }} />
+                </div>
+                {mlStatus.training.state === 'complete' && mlStatus.training.metrics && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, marginTop: 8 }}>
+                    {mlStatus.training.metrics.val_direction_accuracy != null && (
+                      <div style={styles.stat}>
+                        <span style={styles.statLabel}>Val Accuracy</span>
+                        <span style={styles.statValue}>{(mlStatus.training.metrics.val_direction_accuracy * 100).toFixed(1)}%</span>
+                      </div>
+                    )}
+                    {mlStatus.training.metrics.val_loss != null && (
+                      <div style={styles.stat}>
+                        <span style={styles.statLabel}>Val Loss</span>
+                        <span style={styles.statValue}>{mlStatus.training.metrics.val_loss.toFixed(4)}</span>
+                      </div>
+                    )}
+                    {mlStatus.training.metrics.epochs_run != null && (
+                      <div style={styles.stat}>
+                        <span style={styles.statLabel}>Epochs</span>
+                        <span style={styles.statValue}>{mlStatus.training.metrics.epochs_run}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {mlStatus.training.state === 'error' && (
+                  <div style={{ color: '#ef5350', fontSize: 10, marginTop: 4 }}>{mlStatus.training.message}</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Decision Log */}
       <div style={styles.logHeader}>
         <h4 style={styles.logTitle}>Decision Log ({decisions.length})</h4>
@@ -212,4 +289,5 @@ const styles: Record<string, React.CSSProperties> = {
   logTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 },
   logTime: { color: '#555', fontSize: 10 },
   logDetail: { color: '#d1d4dc', fontSize: 11 },
+  mlSection: {},
 };

@@ -343,6 +343,18 @@ export class OandaAdapter implements BrokerAdapter {
     };
   }
 
+  // === Sentiment ===
+
+  async getOrderBook(instrument: string): Promise<{ timestamp: string; buckets: { price: string; longCountPercent: string; shortCountPercent: string }[] }> {
+    const data = await this.request<any>(`${this.config.baseUrl}/v3/instruments/${instrument}/orderBook`);
+    return { timestamp: data.orderBook.time, buckets: data.orderBook.buckets };
+  }
+
+  async getPositionBook(instrument: string): Promise<{ timestamp: string; buckets: { price: string; longCountPercent: string; shortCountPercent: string }[] }> {
+    const data = await this.request<any>(`${this.config.baseUrl}/v3/instruments/${instrument}/positionBook`);
+    return { timestamp: data.positionBook.time, buckets: data.positionBook.buckets };
+  }
+
   // === Kill Switch (Section 3g workaround) ===
 
   async closeAllTrades(): Promise<CloseResponse[]> {

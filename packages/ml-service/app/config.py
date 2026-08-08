@@ -1,0 +1,44 @@
+import os
+
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/trading")
+MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
+
+INSTRUMENT_REGISTRY = {
+    "EUR_USD": {
+        "type": "forex",
+        "pip_value": 0.0001,
+        "sessions": ["london", "ny", "asian"],
+        "strength_basket": ["GBP_USD", "USD_JPY", "USD_CHF"],
+        "label_horizon": 6,
+        "label_threshold_atr": 0.5,
+        "tradeable": True,
+    },
+}
+
+TRAINING_CONFIG = {
+    "universal": {
+        "lookback_window": 60,
+        "feature_count": 49,
+        "lstm_layers": [128, 64],
+        "attention": True,
+        "dropout": 0.2,
+        "dense_units": 32,
+        "batch_size": 64,
+        "max_epochs": 100,
+        "early_stop_patience": 10,
+        "reduce_lr_patience": 5,
+        "initial_lr": 0.001,
+        "loss_weights": {"direction": 0.7, "magnitude": 0.3},
+    },
+    "specialist": {
+        "lookback_window": 60,
+        "feature_count": 55,
+        "lstm_layers": [64, 32],
+        "attention": False,
+        "dropout": 0.2,
+        "dense_units": 16,
+        "batch_size": 32,
+        "max_epochs": 80,
+        "loss_weights": {"confidence": 0.6, "size": 0.4},
+    },
+}

@@ -7,6 +7,7 @@ import { RiskEngine } from '../risk/RiskEngine.js';
 import { StrategyModel } from '../strategies/models.js';
 import { DecisionLogModel, type DecisionType } from '../data/DecisionLog.js';
 import { SignalModel, TradeModel } from '../data/models.js';
+import { MLClient, type MLPrediction } from '../ml/MLClient.js';
 
 export interface AutoTraderStatus {
   running: boolean;
@@ -17,6 +18,7 @@ export interface AutoTraderStatus {
   tradesRejected: number;
   errors: number;
   startedAt: string | null;
+  mlEnabled: boolean;
 }
 
 export class AutoTrader extends EventEmitter {
@@ -24,6 +26,7 @@ export class AutoTrader extends EventEmitter {
   private riskEngine: RiskEngine;
   private indicatorEngine = new IndicatorEngine();
   private signalEngine = new SignalEngine();
+  private mlClient = new MLClient();
   private running = false;
   private timer: ReturnType<typeof setInterval> | null = null;
   private closePollingTimer: ReturnType<typeof setInterval> | null = null;
@@ -89,6 +92,7 @@ export class AutoTrader extends EventEmitter {
       tradesRejected: this.tradesRejected,
       errors: this.errors,
       startedAt: this.startedAt,
+      mlEnabled: this.mlClient.isEnabled(),
     };
   }
 
@@ -236,7 +240,39 @@ export class AutoTrader extends EventEmitter {
       }
 
       if (signal.direction === 'BUY' || signal.direction === 'SELL') {
-        await this.handleEntry(strategy, signal, current);
+        let mlSizeFactor = 1.0;
+
+        if (this.mlClient.isEnabled()) {
+          const prediction = await this.mlClient.predict({
+            instrument: strategy.instrument,
+            candles_h1: candles.slice(-65),
+            rule_signal: { direction: signal.direction, strategy_name: strategyName },
+          }).catch(() => null);
+
+          if (prediction?.meta) {
+            await this.log('SIGNAL_GENERATED', {
+              strategyId, strategyName,
+              instrument: strategy.instrument,
+              direction: signal.direction,
+              message: `ML: ${prediction.meta.action} (conf=${prediction.meta.confidence}, ${prediction.meta.reasoning.join('; ')})`,
+            });
+
+            if (prediction.meta.action === 'SKIP') {
+              await this.log('ORDER_REJECTED', {
+                strategyId, strategyName,
+                instrument: strategy.instrument,
+                direction: signal.direction,
+                message: `ML blocked: ${prediction.meta.reasoning.join('; ')}`,
+              });
+              this.tradesRejected++;
+              return;
+            }
+
+            mlSizeFactor = prediction.meta.size_factor || 1.0;
+          }
+        }
+
+        await this.handleEntry(strategy, signal, current, mlSizeFactor);
       }
     } catch (err: any) {
       this.errors++;
@@ -249,7 +285,7 @@ export class AutoTrader extends EventEmitter {
     }
   }
 
-  private async handleEntry(strategy: any, signal: any, indicators: any): Promise<void> {
+  private async handleEntry(strategy: any, signal: any, indicators: any, mlSizeFactor = 1.0): Promise<void> {
     const account = await this.broker.getAccountSummary();
     const atrValue = indicators.atr?.value ?? 0;
     if (atrValue <= 0) return;
@@ -258,7 +294,8 @@ export class AutoTrader extends EventEmitter {
     const slDistance = atrValue * strategy.stopLossATRMultiplier;
     const tpDistance = slDistance * strategy.takeProfitRatio;
 
-    const units = this.riskEngine.calculatePositionSize(account.balance, slDistance, pipValue);
+    const baseUnits = this.riskEngine.calculatePositionSize(account.balance, slDistance, pipValue);
+    const units = Math.floor(baseUnits * Math.max(0.5, Math.min(1.5, mlSizeFactor)));
     if (units <= 0) return;
 
     const isBuy = signal.direction === 'BUY';

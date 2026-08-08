@@ -51,6 +51,19 @@ export function createAutoTraderRoutes(autoTrader: AutoTrader): Router {
     }
   });
 
+  router.get('/ml/status', async (_req: Request, res: Response) => {
+    const mlUrl = process.env.ML_SERVICE_URL || 'http://localhost:8000';
+    try {
+      const [health, status] = await Promise.all([
+        fetch(`${mlUrl}/health`, { signal: AbortSignal.timeout(2000) }).then(r => r.json()).catch(() => null),
+        fetch(`${mlUrl}/model/status`, { signal: AbortSignal.timeout(2000) }).then(r => r.json()).catch(() => null),
+      ]);
+      res.json({ online: !!health, model_loaded: health?.model_loaded ?? false, training: status });
+    } catch {
+      res.json({ online: false, model_loaded: false, training: null });
+    }
+  });
+
   router.delete('/decisions', async (req: Request, res: Response) => {
     try {
       const type = req.query.type as string;

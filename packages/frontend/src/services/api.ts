@@ -382,3 +382,19 @@ export async function clearDecisionLogs() {
   const { data } = await api.delete('/autotrader/decisions');
   return data as { deleted: number };
 }
+
+export interface MLStatus {
+  online: boolean;
+  model_loaded: boolean;
+  training: {
+    state: string;
+    progress: number;
+    message: string;
+    metrics: Record<string, any>;
+  } | null;
+}
+
+export async function fetchMLStatus() {
+  const { data } = await api.get('/autotrader/ml/status');
+  return data as MLStatus;
+}

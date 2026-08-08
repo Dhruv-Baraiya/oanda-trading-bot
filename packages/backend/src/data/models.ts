@@ -149,3 +149,27 @@ const backtestResultSchema = new Schema<IBacktestResultDoc>({
 }, { timestamps: true });
 
 export const BacktestResultModel = mongoose.model<IBacktestResultDoc>('BacktestResult', backtestResultSchema);
+
+export interface ISentimentDoc extends Document {
+  instrument: string;
+  timestamp: Date;
+  longRatio: number;
+  shortRatio: number;
+  longCount: number;
+  shortCount: number;
+  source: 'orderBook' | 'positionBook';
+}
+
+const sentimentSchema = new Schema<ISentimentDoc>({
+  instrument: { type: String, required: true, index: true },
+  timestamp: { type: Date, required: true },
+  longRatio: { type: Number, required: true },
+  shortRatio: { type: Number, required: true },
+  longCount: { type: Number, required: true },
+  shortCount: { type: Number, required: true },
+  source: { type: String, enum: ['orderBook', 'positionBook'], required: true },
+}, { timestamps: true });
+
+sentimentSchema.index({ instrument: 1, source: 1, timestamp: 1 }, { unique: true });
+
+export const SentimentModel = mongoose.model<ISentimentDoc>('Sentiment', sentimentSchema);
