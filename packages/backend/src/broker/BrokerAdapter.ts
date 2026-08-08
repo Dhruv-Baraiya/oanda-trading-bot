@@ -1,6 +1,7 @@
 import type {
   AccountSummary,
   Candle,
+  ClosedTrade,
   CloseResponse,
   GetCandlesParams,
   Instrument,
@@ -27,6 +28,7 @@ export interface BrokerAdapter {
 
   // Trades
   getOpenTrades(): Promise<Trade[]>;
+  getClosedTrades(sinceId?: string): Promise<ClosedTrade[]>;
   closeTrade(tradeId: string, units?: number): Promise<CloseResponse>;
   modifyTrade(tradeId: string, stopLoss?: number, takeProfit?: number): Promise<void>;
 

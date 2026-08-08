@@ -102,4 +102,17 @@ export interface GetCandlesParams {
   to?: string;
 }
 
+export interface ClosedTrade {
+  tradeId: string;
+  instrument: string;
+  units: number;
+  entryPrice: number;
+  exitPrice: number;
+  openTime: string;
+  closeTime: string;
+  pl: number;
+  stopLossPrice?: number;
+  takeProfitPrice?: number;
+}
+
 export type PriceCallback = (price: PriceUpdate) => void;

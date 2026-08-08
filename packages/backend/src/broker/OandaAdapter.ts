@@ -258,6 +258,24 @@ export class OandaAdapter implements BrokerAdapter {
     }));
   }
 
+  async getClosedTrades(sinceId?: string): Promise<import('./types.js').ClosedTrade[]> {
+    const qs = new URLSearchParams({ state: 'CLOSED', count: '50' });
+    if (sinceId) qs.set('beforeID', sinceId);
+    const data = await this.request<any>(`${this.accountUrl}/trades?${qs}`);
+    return data.trades.map((t: any) => ({
+      tradeId: t.id,
+      instrument: t.instrument,
+      units: parseFloat(t.initialUnits),
+      entryPrice: parseFloat(t.price),
+      exitPrice: parseFloat(t.averageClosePrice ?? t.price),
+      openTime: t.openTime,
+      closeTime: t.closeTime,
+      pl: parseFloat(t.realizedPL),
+      stopLossPrice: t.stopLossOrder ? parseFloat(t.stopLossOrder.price) : undefined,
+      takeProfitPrice: t.takeProfitOrder ? parseFloat(t.takeProfitOrder.price) : undefined,
+    }));
+  }
+
   async closeTrade(tradeId: string, units?: number): Promise<CloseResponse> {
     const body = units ? { units: String(units) } : { units: 'ALL' };
     const data = await this.request<any>(

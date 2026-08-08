@@ -111,6 +111,27 @@ export async function closeTrade(tradeId: string) {
   return data;
 }
 
+export interface TradeHistory {
+  _id: string;
+  tradeId: string;
+  instrument: string;
+  units: number;
+  entryPrice: number;
+  exitPrice?: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  openTime: string;
+  closeTime?: string;
+  pl?: number;
+  state: 'OPEN' | 'CLOSED';
+  signals: string[];
+}
+
+export async function fetchTradeHistory(limit = 50) {
+  const { data } = await api.get(`/trades/history?limit=${limit}`);
+  return data.trades as TradeHistory[];
+}
+
 export async function activateKillSwitch() {
   const { data } = await api.post('/killswitch/activate');
   return data;

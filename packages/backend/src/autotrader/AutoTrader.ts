@@ -6,7 +6,7 @@ import { SignalEngine } from '../strategies/SignalEngine.js';
 import { RiskEngine } from '../risk/RiskEngine.js';
 import { StrategyModel } from '../strategies/models.js';
 import { DecisionLogModel, type DecisionType } from '../data/DecisionLog.js';
-import { SignalModel } from '../data/models.js';
+import { SignalModel, TradeModel } from '../data/models.js';
 
 export interface AutoTraderStatus {
   running: boolean;
@@ -26,6 +26,7 @@ export class AutoTrader extends EventEmitter {
   private signalEngine = new SignalEngine();
   private running = false;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private closePollingTimer: ReturnType<typeof setInterval> | null = null;
   private evaluationCount = 0;
   private tradesPlaced = 0;
   private tradesRejected = 0;
@@ -54,8 +55,10 @@ export class AutoTrader extends EventEmitter {
     this.emit('status', this.getStatus());
 
     await this.evaluate();
+    await this.syncClosedTrades();
 
     this.timer = setInterval(() => this.evaluate(), intervalMs);
+    this.closePollingTimer = setInterval(() => this.syncClosedTrades(), 5 * 60 * 1000);
   }
 
   async stop(): Promise<void> {
@@ -65,6 +68,10 @@ export class AutoTrader extends EventEmitter {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
+    }
+    if (this.closePollingTimer) {
+      clearInterval(this.closePollingTimer);
+      this.closePollingTimer = null;
     }
 
     await this.log('BOT_STOPPED', { message: 'Auto-trader stopped' });
@@ -291,6 +298,20 @@ export class AutoTrader extends EventEmitter {
         },
       });
 
+      if (order.tradeId) {
+        await TradeModel.create({
+          tradeId: order.tradeId,
+          instrument: strategy.instrument,
+          units: signedUnits,
+          entryPrice: order.price,
+          stopLoss: parseFloat(stopLoss.toFixed(slPrecision)),
+          takeProfit: parseFloat(takeProfit.toFixed(slPrecision)),
+          openTime: new Date(order.timestamp),
+          state: 'OPEN',
+          signals: [strategy.name],
+        }).catch(err => console.error('[AutoTrader] Failed to save trade:', err.message));
+      }
+
       this.emit('trade', { type: 'entry', order, strategy: strategy.name, signal });
     } catch (err: any) {
       this.tradesRejected++;
@@ -316,6 +337,18 @@ export class AutoTrader extends EventEmitter {
       for (const trade of matching) {
         const result = await this.broker.closeTrade(trade.tradeId);
 
+        await TradeModel.updateOne(
+          { tradeId: trade.tradeId },
+          {
+            $set: {
+              exitPrice: result.price,
+              closeTime: new Date(result.timestamp),
+              pl: result.pl,
+              state: 'CLOSED',
+            },
+          }
+        ).catch(err => console.error('[AutoTrader] Failed to update trade:', err.message));
+
         await this.log('TRADE_CLOSED', {
           strategyId: strategy._id.toString(),
           strategyName: strategy.name,
@@ -338,6 +371,44 @@ export class AutoTrader extends EventEmitter {
         instrument: strategy.instrument,
         message: `Exit failed: ${err.message}`,
       });
+    }
+  }
+
+  private async syncClosedTrades(): Promise<void> {
+    try {
+      const openTrades = await TradeModel.find({ state: 'OPEN' }).lean();
+      if (openTrades.length === 0) return;
+
+      const closedFromOanda = await this.broker.getClosedTrades();
+      const closedMap = new Map(closedFromOanda.map(t => [t.tradeId, t]));
+
+      for (const trade of openTrades) {
+        const closed = closedMap.get(trade.tradeId);
+        if (closed) {
+          await TradeModel.updateOne(
+            { tradeId: trade.tradeId },
+            {
+              $set: {
+                exitPrice: closed.exitPrice,
+                closeTime: new Date(closed.closeTime),
+                pl: closed.pl,
+                state: 'CLOSED',
+              },
+            }
+          );
+
+          await this.log('TRADE_CLOSED', {
+            instrument: closed.instrument,
+            tradeResult: {
+              tradeId: closed.tradeId,
+              pnl: closed.pl,
+              exitReason: 'SL_TP_HIT',
+            },
+          });
+        }
+      }
+    } catch (err: any) {
+      console.error('[AutoTrader] syncClosedTrades error:', err.message);
     }
   }
 

@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import type { BrokerAdapter } from '../broker/BrokerAdapter.js';
+import { TradeModel } from '../data/models.js';
 
 export function createTradeRoutes(broker: BrokerAdapter): Router {
   const router = Router();
@@ -8,6 +9,46 @@ export function createTradeRoutes(broker: BrokerAdapter): Router {
     try {
       const trades = await broker.getOpenTrades();
       res.json({ count: trades.length, trades });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/history', async (req: Request, res: Response) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const trades = await TradeModel.find().sort({ openTime: -1 }).limit(limit).lean();
+      res.json({ count: trades.length, trades });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/sync', async (_req: Request, res: Response) => {
+    try {
+      const closedTrades = await broker.getClosedTrades();
+      let synced = 0;
+      for (const t of closedTrades) {
+        const exists = await TradeModel.findOne({ tradeId: t.tradeId });
+        if (!exists) {
+          await TradeModel.create({
+            tradeId: t.tradeId,
+            instrument: t.instrument,
+            units: t.units,
+            entryPrice: t.entryPrice,
+            exitPrice: t.exitPrice,
+            stopLoss: t.stopLossPrice,
+            takeProfit: t.takeProfitPrice,
+            openTime: new Date(t.openTime),
+            closeTime: new Date(t.closeTime),
+            pl: t.pl,
+            state: 'CLOSED',
+            signals: [],
+          });
+          synced++;
+        }
+      }
+      res.json({ synced, total: closedTrades.length });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

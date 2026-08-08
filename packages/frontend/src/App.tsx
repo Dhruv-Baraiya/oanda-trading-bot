@@ -12,6 +12,7 @@ import { StrategyBuilder } from './components/StrategyBuilder/StrategyBuilder';
 import { SignalFeed } from './components/SignalFeed/SignalFeed';
 import { BacktestPanel } from './components/Backtest/BacktestPanel';
 import { AutoTraderPanel } from './components/AutoTrader/AutoTraderPanel';
+import { TradeHistoryPanel } from './components/TradeHistory/TradeHistoryPanel';
 import { useCandles } from './hooks/useCandles';
 import { useAccount } from './hooks/useAccount';
 import { useTrades } from './hooks/useTrades';
@@ -19,7 +20,7 @@ import { fetchInstruments, type Instrument } from './services/api';
 
 const GRANULARITIES = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D'];
 
-type SidebarTab = 'trading' | 'strategies' | 'signals' | 'backtest' | 'bot';
+type SidebarTab = 'trading' | 'history' | 'strategies' | 'signals' | 'backtest' | 'bot';
 
 function App() {
   const [instruments, setInstruments] = useState<Instrument[]>([]);
@@ -77,13 +78,13 @@ function App() {
 
         <div style={styles.sidebar}>
           <div style={styles.tabs}>
-            {(['trading', 'strategies', 'signals', 'backtest', 'bot'] as SidebarTab[]).map(tab => (
+            {(['trading', 'history', 'strategies', 'signals', 'backtest', 'bot'] as SidebarTab[]).map(tab => (
               <button
                 key={tab}
                 style={{ ...styles.tab, ...(sidebarTab === tab ? styles.tabActive : {}) }}
                 onClick={() => setSidebarTab(tab)}
               >
-                {{ trading: 'Trade', strategies: 'Strategy', signals: 'Signals', backtest: 'Backtest', bot: 'Bot' }[tab]}
+                {{ trading: 'Trade', history: 'History', strategies: 'Strategy', signals: 'Signals', backtest: 'Backtest', bot: 'Bot' }[tab]}
               </button>
             ))}
           </div>
@@ -96,6 +97,10 @@ function App() {
               <ManualTrade instrument={instrument} onOrderPlaced={handleAction} />
               <TradeList trades={trades} onTradeAction={handleAction} />
             </>
+          )}
+
+          {sidebarTab === 'history' && (
+            <TradeHistoryPanel />
           )}
 
           {sidebarTab === 'strategies' && (
