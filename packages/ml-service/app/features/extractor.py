@@ -19,51 +19,40 @@ class FeatureExtractor:
         sentiment: pd.DataFrame | None = None,
     ) -> np.ndarray:
         """Build feature matrix from multi-timeframe candles.
-        Returns shape (num_samples, lookback, num_features)."""
+        Returns shape (num_samples, lookback, num_features).
+        Only includes feature groups with actual data to avoid zero-noise."""
 
-        # Group A: Base OHLCV (5 features)
+        # Group A: Base OHLCV (5 features) — always present
         base = self._base_features(h1)
 
-        # Group B: Technical Indicators (15 features)
+        # Group B: Technical Indicators (15 features) — always present
         indicators = compute_indicators(h1)
 
-        # Group C: M1 Microstructure (8 features)
-        micro = compute_microstructure(h1, m1) if m1 is not None and len(m1) > 0 else pd.DataFrame(
-            np.zeros((len(h1), 8)),
-            index=h1.index,
-            columns=[f"micro_{i}" for i in range(8)],
-        )
-
-        # Group D: M15 Momentum (4 features)
-        m15_feat = self._m15_momentum(h1, m15) if m15 is not None and len(m15) > 0 else pd.DataFrame(
-            np.zeros((len(h1), 4)), index=h1.index, columns=[f"m15_ret_{i}" for i in range(4)]
-        )
-
-        # Group E: H4 Context (4 features)
-        h4_feat = self._h4_context(h1, h4) if h4 is not None and len(h4) > 0 else pd.DataFrame(
-            np.zeros((len(h1), 4)), index=h1.index, columns=[f"h4_{i}" for i in range(4)]
-        )
-
-        # Group F: Time/Session (7 features)
+        # Group F: Time/Session (7 features) — always present
         time_feat = self._time_features(h1)
 
-        # Group G: Sentiment (3 features)
-        sent_feat = self._sentiment_features(h1, sentiment) if sentiment is not None and len(sentiment) > 0 else pd.DataFrame(
-            np.zeros((len(h1), 3)), index=h1.index, columns=["long_ratio", "net_change", "extreme"]
-        )
+        groups = [base, indicators, time_feat]
 
-        # Group H: Currency Strength (3 features) — placeholder, computed separately
-        strength = pd.DataFrame(
-            np.zeros((len(h1), 3)), index=h1.index, columns=["base_strength", "quote_strength", "divergence"]
-        )
+        # Group C: M1 Microstructure (8 features) — only if sufficient M1 data
+        if m1 is not None and len(m1) > 500:
+            groups.append(compute_microstructure(h1, m1))
 
-        all_features = pd.concat([base, indicators, micro, m15_feat, h4_feat, time_feat, sent_feat, strength], axis=1)
+        # Group D: M15 Momentum (4 features) — only if sufficient M15 data
+        if m15 is not None and len(m15) > 100:
+            groups.append(self._m15_momentum(h1, m15))
+
+        # Group E: H4 Context (4 features) — only if sufficient H4 data
+        if h4 is not None and len(h4) > 50:
+            groups.append(self._h4_context(h1, h4))
+
+        # Group G: Sentiment (3 features) — only if enough snapshots
+        if sentiment is not None and len(sentiment) > 100:
+            groups.append(self._sentiment_features(h1, sentiment))
+
+        all_features = pd.concat(groups, axis=1)
         all_features = all_features.fillna(0)
 
-        # Normalize
         normalized = self.normalizer.transform(all_features)
-
-        # Build lookback windows
         return self._build_windows(normalized)
 
     def _base_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -76,14 +65,29 @@ class FeatureExtractor:
         return result
 
     def _m15_momentum(self, h1: pd.DataFrame, m15: pd.DataFrame) -> pd.DataFrame:
-        result = pd.DataFrame(np.zeros((len(h1), 4)), index=h1.index, columns=["m15_ret_1", "m15_ret_2", "m15_ret_3", "m15_ret_4"])
-        m15_returns = m15["close"].pct_change()
+        cols = ["m15_ret_1", "m15_ret_2", "m15_ret_3", "m15_ret_4",
+                "m15_vol_ratio", "m15_range_ratio"]
+        result = pd.DataFrame(np.zeros((len(h1), 6)), index=h1.index, columns=cols)
+        m15_returns = m15["close"].pct_change().values
+        m15_idx = m15.index.values
+        m15_vol = m15["volume"].values
+        m15_range = ((m15["high"] - m15["low"]) / m15["close"]).values
+        h1_idx = h1.index.values
 
-        for i, ts in enumerate(h1.index):
-            prior = m15_returns[m15_returns.index < ts].tail(4)
-            vals = prior.values
-            for j in range(min(len(vals), 4)):
-                result.iloc[i, j] = vals[-(j + 1)]
+        for i in range(len(h1_idx)):
+            mask = m15_idx < h1_idx[i]
+            valid = mask.sum()
+            if valid < 5:
+                continue
+            start = max(0, valid - 4)
+            rets = m15_returns[start:valid]
+            for j in range(len(rets)):
+                result.iloc[i, j] = rets[-(j + 1)] if j < len(rets) else 0
+            recent_vol = m15_vol[max(0, valid - 4):valid]
+            older_vol = m15_vol[max(0, valid - 20):max(0, valid - 4)]
+            result.iloc[i, 4] = recent_vol.mean() / older_vol.mean() if len(older_vol) > 0 and older_vol.mean() > 0 else 1.0
+            recent_range = m15_range[max(0, valid - 4):valid]
+            result.iloc[i, 5] = recent_range.mean()
 
         return result
 

@@ -28,7 +28,7 @@ TRAINING_CONFIG = {
         "early_stop_patience": 10,
         "reduce_lr_patience": 5,
         "initial_lr": 0.001,
-        "loss_weights": {"direction": 0.7, "magnitude": 0.3},
+        "loss_weights": {"direction": 0.8, "magnitude": 0.2},
     },
     "specialist": {
         "lookback_window": 60,

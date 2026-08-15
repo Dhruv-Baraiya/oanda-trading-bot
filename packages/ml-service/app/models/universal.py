@@ -34,7 +34,7 @@ def build_universal_model(feature_count: int = 49, lookback: int = 60) -> keras.
         x = x[:, -1, :]
 
     x = keras.layers.Dense(cfg["dense_units"], activation="relu")(x)
-    x = keras.layers.Dropout(0.3)(x)
+    x = keras.layers.Dropout(cfg["dropout"])(x)
 
     direction_out = keras.layers.Dense(3, activation="softmax", name="direction")(x)
     magnitude_out = keras.layers.Dense(1, activation="linear", name="magnitude")(x)
@@ -57,8 +57,11 @@ def load_universal_model(version: str = "latest") -> keras.Model | None:
     if os.path.exists(path) and os.path.exists(meta_path):
         meta = np.load(meta_path, allow_pickle=True).item()
         model = build_universal_model(feature_count=meta["feature_count"], lookback=meta["lookback"])
-        model.load_weights(path)
-        return model
+        try:
+            model.load_weights(path)
+            return model
+        except (ValueError, Exception) as e:
+            print(f"[ML] Weight mismatch for local {version}: {e}")
 
     return _load_from_mongo(version)
 
@@ -77,7 +80,12 @@ def _load_from_mongo(version: str) -> keras.Model | None:
     tmp = tempfile.NamedTemporaryFile(suffix=".weights.h5", delete=False)
     tmp.write(doc["weights"])
     tmp.close()
-    model.load_weights(tmp.name)
+    try:
+        model.load_weights(tmp.name)
+    except (ValueError, Exception) as e:
+        os.unlink(tmp.name)
+        print(f"[ML] Weight mismatch for MongoDB {version}: {e}")
+        return None
     os.unlink(tmp.name)
 
     print(f"[ML] Loaded universal-{version} from MongoDB")

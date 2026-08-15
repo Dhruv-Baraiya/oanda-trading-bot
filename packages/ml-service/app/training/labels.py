@@ -4,18 +4,21 @@ import pandas as pd
 
 def generate_direction_labels(
     h1: pd.DataFrame,
-    horizon: int = 6,
-    threshold_atr_mult: float = 0.5,
+    horizon: int = 12,
+    threshold_atr_mult: float = 0.7,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Generate direction (3-class) and magnitude labels for universal model.
+    """Generate direction (3-class) and magnitude labels using max-excursion method.
+    Looks at actual price path over horizon, not just endpoint.
     Returns (direction_onehot, magnitude) aligned with h1 index."""
 
     close = h1["close"].values
+    high = h1["high"].values
+    low = h1["low"].values
     tr = np.maximum(
-        h1["high"].values - h1["low"].values,
+        high - low,
         np.maximum(
-            np.abs(h1["high"].values - np.roll(close, 1)),
-            np.abs(h1["low"].values - np.roll(close, 1)),
+            np.abs(high - np.roll(close, 1)),
+            np.abs(low - np.roll(close, 1)),
         ),
     )
     atr = pd.Series(tr).rolling(14).mean().values
@@ -25,19 +28,26 @@ def generate_direction_labels(
     magnitudes = np.zeros(n)
 
     for i in range(n - horizon):
-        future_return = (close[i + horizon] - close[i]) / close[i]
-        threshold = threshold_atr_mult * atr[i] if atr[i] > 0 else 0.001
+        if atr[i] <= 0 or np.isnan(atr[i]):
+            directions[i] = [0, 0, 1]
+            continue
 
-        if future_return > threshold:
-            directions[i] = [1, 0, 0]  # UP
-        elif future_return < -threshold:
-            directions[i] = [0, 1, 0]  # DOWN
+        entry = close[i]
+        threshold = threshold_atr_mult * atr[i]
+
+        max_up = max(high[i+1:i+horizon+1]) - entry
+        max_down = entry - min(low[i+1:i+horizon+1])
+
+        if max_up > threshold and max_up > max_down * 1.3:
+            directions[i] = [1, 0, 0]  # UP — clear upward excursion
+        elif max_down > threshold and max_down > max_up * 1.3:
+            directions[i] = [0, 1, 0]  # DOWN — clear downward excursion
         else:
-            directions[i] = [0, 0, 1]  # FLAT
+            directions[i] = [0, 0, 1]  # FLAT — choppy or no clear direction
 
-        magnitudes[i] = future_return / atr[i] if atr[i] > 0 else 0
+        net_move = (close[min(i + horizon, n - 1)] - entry) / entry
+        magnitudes[i] = net_move / atr[i]
 
-    # Trim last `horizon` rows (no future data)
     valid = n - horizon
     return directions[:valid], magnitudes[:valid]
 

@@ -84,8 +84,8 @@ class TrainingPipeline:
         model = build_universal_model(feature_count=X.shape[2], lookback=X.shape[1])
 
         callbacks = [
-            keras.callbacks.EarlyStopping(patience=cfg["early_stop_patience"], restore_best_weights=True),
-            keras.callbacks.ReduceLROnPlateau(patience=cfg["reduce_lr_patience"], factor=0.5),
+            keras.callbacks.EarlyStopping(patience=cfg["early_stop_patience"], restore_best_weights=True, monitor="val_direction_accuracy", mode="max"),
+            keras.callbacks.ReduceLROnPlateau(patience=cfg["reduce_lr_patience"], factor=0.5, monitor="val_loss"),
         ]
 
         history = model.fit(
@@ -95,7 +95,7 @@ class TrainingPipeline:
             epochs=cfg["max_epochs"],
             batch_size=cfg["batch_size"],
             callbacks=callbacks,
-            verbose=0,
+            verbose=1,
         )
 
         # Evaluate
