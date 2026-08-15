@@ -45,21 +45,27 @@ def load_specialist_model(instrument: str, version: str = "latest") -> keras.Mod
 def _load_from_mongo(instrument: str, version: str) -> keras.Model | None:
     from app.data.mongo_client import get_collection
 
-    doc = get_collection("ml_models").find_one({"name": f"specialist-{instrument}-{version}"})
-    if not doc:
+    try:
+        doc = get_collection("ml_models").find_one({"name": f"specialist-{instrument}-{version}"})
+        if not doc:
+            print(f"[ML] specialist-{instrument}-{version} not found in MongoDB")
+            return None
+
+        meta = doc["meta"]
+        print(f"[ML] Loading specialist-{instrument}-{version} from MongoDB (features={meta['feature_count']})")
+        model = build_specialist_model(feature_count=meta["feature_count"], lookback=meta["lookback"])
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".weights.h5", delete=False)
+        tmp.write(doc["weights"])
+        tmp.close()
+        model.load_weights(tmp.name)
+        os.unlink(tmp.name)
+
+        print(f"[ML] Loaded specialist-{instrument}-{version} from MongoDB")
+        return model
+    except Exception as e:
+        print(f"[ML] Error loading specialist-{instrument}-{version}: {e}")
         return None
-
-    meta = doc["meta"]
-    model = build_specialist_model(feature_count=meta["feature_count"], lookback=meta["lookback"])
-
-    tmp = tempfile.NamedTemporaryFile(suffix=".weights.h5", delete=False)
-    tmp.write(doc["weights"])
-    tmp.close()
-    model.load_weights(tmp.name)
-    os.unlink(tmp.name)
-
-    print(f"[ML] Loaded specialist-{instrument}-{version} from MongoDB")
-    return model
 
 
 def save_specialist_model(model: keras.Model, instrument: str, version: str):
