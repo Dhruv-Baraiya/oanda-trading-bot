@@ -85,8 +85,14 @@ def predict(req: PredictRequest):
     if len(features) == 0:
         return {"error": "Not enough candle data for prediction (need 60+ H1 candles)"}
 
-    # Use last window
+    # Use last window, pad to match model input if needed
     X = features[-1:].astype(np.float32)
+    expected_features = universal.input_shape[2]
+    if X.shape[2] < expected_features:
+        pad_width = expected_features - X.shape[2]
+        X = np.pad(X, ((0, 0), (0, 0), (0, pad_width)), mode='constant')
+    elif X.shape[2] > expected_features:
+        X = X[:, :, :expected_features]
 
     # Universal prediction
     uni_start = time.time()
@@ -113,7 +119,13 @@ def predict(req: PredictRequest):
     spec_size = None
     if specialist is not None:
         spec_start = time.time()
-        conf, size = specialist.predict(X, verbose=0)
+        X_spec = X
+        spec_features = specialist.input_shape[2]
+        if X_spec.shape[2] < spec_features:
+            X_spec = np.pad(X_spec, ((0, 0), (0, 0), (0, spec_features - X_spec.shape[2])), mode='constant')
+        elif X_spec.shape[2] > spec_features:
+            X_spec = X_spec[:, :, :spec_features]
+        conf, size = specialist.predict(X_spec, verbose=0)
         spec_time = int((time.time() - spec_start) * 1000)
         spec_conf = float(conf[0][0])
         spec_size = float(size[0][0])
