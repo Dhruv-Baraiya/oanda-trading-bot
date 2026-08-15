@@ -1,4 +1,13 @@
 import os
+from pathlib import Path
+
+_env_path = Path(__file__).resolve().parents[3] / ".env"
+if _env_path.exists():
+    for line in _env_path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
 
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/trading")
 MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
