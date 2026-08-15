@@ -27,7 +27,7 @@ export class MLClient {
   private timeout: number;
   private enabled: boolean;
 
-  constructor(baseUrl?: string, timeout = 2000) {
+  constructor(baseUrl?: string, timeout = 5000) {
     this.baseUrl = baseUrl || process.env.ML_SERVICE_URL || 'http://localhost:8000';
     this.timeout = timeout;
     this.enabled = true;

@@ -151,7 +151,69 @@ export class AutoTrader extends EventEmitter {
 
       const signal = this.signalEngine.evaluate(strategy, current, previous);
 
+      // Fetch multi-timeframe candles for ML (non-blocking, best-effort)
+      let candlesM15: any[] | undefined;
+      let candlesH4: any[] | undefined;
+      if (this.mlClient.isEnabled()) {
+        [candlesM15, candlesH4] = await Promise.all([
+          this.broker.getCandles({ instrument: strategy.instrument, granularity: 'M15' as CandleGranularity, count: 100 }).catch(() => undefined),
+          this.broker.getCandles({ instrument: strategy.instrument, granularity: 'H4' as CandleGranularity, count: 60 }).catch(() => undefined),
+        ]);
+      }
+
       if (!signal) {
+        // No rule signal — check if ML wants to initiate a trade
+        if (this.mlClient.isEnabled()) {
+          const prediction = await this.mlClient.predict({
+            instrument: strategy.instrument,
+            candles_h1: candles.slice(-65),
+            candles_m15: candlesM15,
+            candles_h4: candlesH4,
+            rule_signal: undefined,
+          }).catch(() => null);
+
+          if (prediction?.meta?.action === 'AI_TRADE' && prediction.meta.direction) {
+            const aiDirection = prediction.meta.direction;
+
+            await this.log('SIGNAL_GENERATED', {
+              strategyId, strategyName,
+              instrument: strategy.instrument,
+              direction: aiDirection,
+              message: `ML-initiated: ${aiDirection} (conf=${prediction.meta.confidence}, ${prediction.meta.reasoning.join('; ')})`,
+            });
+
+            const openTrades = await this.broker.getOpenTrades();
+            const sameInstrumentTrades = openTrades.filter(t => t.instrument === strategy.instrument);
+            if (sameInstrumentTrades.length >= strategy.maxOpenTrades) return;
+
+            const riskCheck = this.riskEngine.checkEntryAllowed();
+            if (!riskCheck.allowed) return;
+
+            const aiSignal = {
+              instrument: strategy.instrument,
+              direction: aiDirection,
+              confidence: prediction.meta.confidence,
+              triggeredConditions: ['ML_AI_TRADE'],
+              indicatorValues: {},
+            };
+
+            await SignalModel.create({
+              instrument: strategy.instrument,
+              direction: aiDirection,
+              source: `${strategyName}_ML`,
+              strategyId, strategyName,
+              confidence: prediction.meta.confidence,
+              indicators: {},
+              triggeredConditions: ['ML_AI_TRADE'],
+              timestamp: new Date(),
+              acted: true,
+            });
+
+            await this.handleEntry(strategy, aiSignal, current, prediction.meta.size_factor || 0.5);
+            return;
+          }
+        }
+
         await this.log('EVALUATION_SKIP', {
           strategyId,
           strategyName,
@@ -246,6 +308,8 @@ export class AutoTrader extends EventEmitter {
           const prediction = await this.mlClient.predict({
             instrument: strategy.instrument,
             candles_h1: candles.slice(-65),
+            candles_m15: candlesM15,
+            candles_h4: candlesH4,
             rule_signal: { direction: signal.direction, strategy_name: strategyName },
           }).catch(() => null);
 
