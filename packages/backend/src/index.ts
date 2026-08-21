@@ -18,6 +18,7 @@ import { createAutoTraderRoutes } from './routes/autotrader.js';
 import { AutoTrader } from './autotrader/AutoTrader.js';
 import { DataCollector } from './data/DataCollector.js';
 import { createDataCollectorRoutes } from './routes/datacollector.js';
+import { createMigrateRoutes } from './routes/migrate.js';
 import { connectDB } from './data/db.js';
 import { setupPriceStream } from './websocket/priceStream.js';
 
@@ -87,6 +88,7 @@ app.use('/api/autotrader', createAutoTraderRoutes(autoTrader));
 
 const dataCollector = new DataCollector(broker);
 app.use('/api/datacollector', createDataCollectorRoutes(dataCollector));
+app.use('/api/migrate', createMigrateRoutes());
 
 async function start() {
   try {

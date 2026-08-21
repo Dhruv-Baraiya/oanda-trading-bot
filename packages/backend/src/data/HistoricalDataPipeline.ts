@@ -1,6 +1,6 @@
 import type { BrokerAdapter } from '../broker/BrokerAdapter.js';
 import type { Candle, CandleGranularity } from '../broker/types.js';
-import { CandleModel } from './models.js';
+import { D1CandleClient } from './D1Client.js';
 
 const GRANULARITY_SECONDS: Record<string, number> = {
   M1: 60, M5: 300, M15: 900, M30: 1800,
@@ -90,24 +90,7 @@ export class HistoricalDataPipeline {
     granularity: string,
     candles: Candle[]
   ): Promise<number> {
-    const ops = candles.map(c => ({
-      updateOne: {
-        filter: { instrument, granularity, timestamp: new Date(c.timestamp) },
-        update: {
-          $set: {
-            open: c.open,
-            high: c.high,
-            low: c.low,
-            close: c.close,
-            volume: c.volume,
-          },
-        },
-        upsert: true,
-      },
-    }));
-
-    const result = await CandleModel.bulkWrite(ops);
-    return result.upsertedCount + result.modifiedCount;
+    return D1CandleClient.upsert(instrument, granularity, candles);
   }
 
   async getStoredCandles(
@@ -116,33 +99,11 @@ export class HistoricalDataPipeline {
     from: Date,
     to: Date
   ): Promise<Candle[]> {
-    const docs = await CandleModel.find({
-      instrument,
-      granularity,
-      timestamp: { $gte: from, $lte: to },
-    }).sort({ timestamp: 1 }).lean();
-
-    return docs.map(d => ({
-      timestamp: d.timestamp.toISOString(),
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-      volume: d.volume,
-      complete: true,
-    }));
+    return D1CandleClient.find({ instrument, granularity, from, to });
   }
 
   async getStoredRange(instrument: string, granularity: string): Promise<{ from: Date; to: Date; count: number } | null> {
-    const count = await CandleModel.countDocuments({ instrument, granularity });
-    if (count === 0) return null;
-
-    const first = await CandleModel.findOne({ instrument, granularity }).sort({ timestamp: 1 }).lean();
-    const last = await CandleModel.findOne({ instrument, granularity }).sort({ timestamp: -1 }).lean();
-
-    if (!first || !last) return null;
-
-    return { from: first.timestamp, to: last.timestamp, count };
+    return D1CandleClient.getRange(instrument, granularity);
   }
 }
 

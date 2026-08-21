@@ -1,2 +1,3 @@
 packages:
   - 'packages/*'
+approveBuilds: esbuild workerd sharp msgpackr-extract

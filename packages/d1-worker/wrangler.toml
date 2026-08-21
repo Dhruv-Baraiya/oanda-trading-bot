@@ -1,0 +1,15 @@
+name = "trading-bot-d1"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+[[ d1_databases ]]
+binding = "DB"
+database_name = "trading-bot-db"
+database_id = "2f7bfb08-ef7d-41d3-b98f-f1e7a7248f17"
+
+# Uncomment when R2 is enabled:
+# [[ r2_buckets ]]
+# binding = "MODELS"
+# bucket_name = "trading-bot-models"
+
+# API_KEY is set via `wrangler secret put API_KEY` (encrypted, not in code)

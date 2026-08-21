@@ -1,6 +1,7 @@
 import type { OandaAdapter } from '../broker/OandaAdapter.js';
 import type { CandleGranularity } from '../broker/types.js';
-import { CandleModel, SentimentModel } from './models.js';
+import { SentimentModel } from './models.js';
+import { D1CandleClient } from './D1Client.js';
 
 interface CollectorConfig {
   instruments: string[];
@@ -81,22 +82,8 @@ export class DataCollector {
 
           const completedCandles = candles.filter(c => c.complete);
 
-          for (const c of completedCandles) {
-            await CandleModel.updateOne(
-              { instrument, granularity: gran, timestamp: new Date(c.timestamp) },
-              {
-                $set: {
-                  open: c.open,
-                  high: c.high,
-                  low: c.low,
-                  close: c.close,
-                  volume: c.volume,
-                },
-              },
-              { upsert: true }
-            );
-            this.stats.candlesSaved++;
-          }
+          const inserted = await D1CandleClient.upsert(instrument, gran, completedCandles);
+          this.stats.candlesSaved += inserted;
         } catch (err: any) {
           this.stats.errors++;
           console.error(`[DataCollector] Candle fetch error ${instrument}/${gran}:`, err.message);
@@ -158,22 +145,7 @@ export class DataCollector {
   async backfillCandles(instrument: string, granularity: CandleGranularity, count: number): Promise<number> {
     const candles = await this.broker.getCandles({ instrument, granularity, count });
     const completed = candles.filter(c => c.complete);
-    let saved = 0;
-
-    for (const c of completed) {
-      const result = await CandleModel.updateOne(
-        { instrument, granularity, timestamp: new Date(c.timestamp) },
-        {
-          $set: {
-            open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume,
-          },
-        },
-        { upsert: true }
-      );
-      if (result.upsertedCount > 0) saved++;
-    }
-
-    return saved;
+    return D1CandleClient.upsert(instrument, granularity, completed);
   }
 
   async backfillDateRange(
@@ -198,15 +170,8 @@ export class DataCollector {
       if (candles.length === 0) break;
 
       const completed = candles.filter(c => c.complete && c.timestamp <= to);
-
-      for (const c of completed) {
-        const result = await CandleModel.updateOne(
-          { instrument, granularity, timestamp: new Date(c.timestamp) },
-          { $set: { open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume } },
-          { upsert: true }
-        );
-        if (result.upsertedCount > 0) saved++;
-      }
+      const batchSaved = await D1CandleClient.upsert(instrument, granularity, completed);
+      saved += batchSaved;
 
       batch++;
       if (onProgress) onProgress(saved, batch);

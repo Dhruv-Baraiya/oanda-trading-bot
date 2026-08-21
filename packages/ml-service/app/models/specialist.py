@@ -2,7 +2,7 @@ import os
 import tempfile
 import numpy as np
 from tensorflow import keras
-from app.config import TRAINING_CONFIG, MODEL_DIR
+from app.config import TRAINING_CONFIG, MODEL_DIR, MODEL_STORAGE
 
 
 def build_specialist_model(feature_count: int = 49, lookback: int = 60) -> keras.Model:
@@ -39,6 +39,8 @@ def load_specialist_model(instrument: str, version: str = "latest") -> keras.Mod
         model.load_weights(path)
         return model
 
+    if MODEL_STORAGE == "r2":
+        return _load_from_r2(instrument, version)
     return _load_from_mongo(instrument, version)
 
 
@@ -68,6 +70,36 @@ def _load_from_mongo(instrument: str, version: str) -> keras.Model | None:
         return None
 
 
+def _load_from_r2(instrument: str, version: str) -> keras.Model | None:
+    from app.data.d1_client import get_model_weights, get_model_meta
+
+    try:
+        name = f"specialist-{instrument}-{version}"
+        meta = get_model_meta(name)
+        if not meta:
+            print(f"[ML] {name} not found in R2")
+            return None
+
+        weights_data = get_model_weights(name)
+        if not weights_data:
+            return None
+
+        print(f"[ML] Loading {name} from R2 (features={meta['feature_count']})")
+        model = build_specialist_model(feature_count=meta["feature_count"], lookback=meta["lookback"])
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".weights.h5", delete=False)
+        tmp.write(weights_data)
+        tmp.close()
+        model.load_weights(tmp.name)
+        os.unlink(tmp.name)
+
+        print(f"[ML] Loaded {name} from R2")
+        return model
+    except Exception as e:
+        print(f"[ML] Error loading specialist-{instrument}-{version}: {e}")
+        return None
+
+
 def save_specialist_model(model: keras.Model, instrument: str, version: str):
     os.makedirs(MODEL_DIR, exist_ok=True)
     path = os.path.join(MODEL_DIR, f"specialist-{instrument}-{version}.weights.h5")
@@ -80,9 +112,14 @@ def save_specialist_model(model: keras.Model, instrument: str, version: str):
     model.save_weights(latest_w)
     np.save(os.path.join(MODEL_DIR, f"specialist-{instrument}-latest.meta.npy"), meta)
 
-    _save_to_mongo(path, meta, instrument, version)
-    if version != "latest":
-        _save_to_mongo(latest_w, meta, instrument, "latest")
+    if MODEL_STORAGE == "r2":
+        _save_to_r2(path, meta, instrument, version)
+        if version != "latest":
+            _save_to_r2(latest_w, meta, instrument, "latest")
+    else:
+        _save_to_mongo(path, meta, instrument, version)
+        if version != "latest":
+            _save_to_mongo(latest_w, meta, instrument, "latest")
 
     return path
 
@@ -101,3 +138,11 @@ def _save_to_mongo(weights_path: str, meta: dict, instrument: str, version: str)
         upsert=True,
     )
     print(f"[ML] Saved {name} to MongoDB ({len(weights_bin)} bytes)")
+
+
+def _save_to_r2(weights_path: str, meta: dict, instrument: str, version: str):
+    from app.data.d1_client import save_model_weights
+
+    name = f"specialist-{instrument}-{version}"
+    save_model_weights(name, weights_path, meta)
+    print(f"[ML] Saved {name} to R2")

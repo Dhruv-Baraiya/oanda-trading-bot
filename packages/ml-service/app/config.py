@@ -14,6 +14,7 @@ except (IndexError, OSError):
 
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/trading")
 MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
+MODEL_STORAGE = os.getenv("MODEL_STORAGE", "mongo")  # "mongo" or "r2"
 
 INSTRUMENT_REGISTRY = {
     "EUR_USD": {

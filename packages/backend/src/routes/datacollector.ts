@@ -1,7 +1,8 @@
 import { Router, type Request, type Response } from 'express';
 import type { DataCollector } from '../data/DataCollector.js';
 import type { CandleGranularity } from '../broker/types.js';
-import { CandleModel, SentimentModel } from '../data/models.js';
+import { SentimentModel } from '../data/models.js';
+import { D1CandleClient } from '../data/D1Client.js';
 
 export function createDataCollectorRoutes(collector: DataCollector): Router {
   const router = Router();
@@ -104,11 +105,10 @@ export function createDataCollectorRoutes(collector: DataCollector): Router {
       if (instrument) filter.instrument = instrument;
       if (granularity) filter.granularity = granularity;
 
-      const counts = await CandleModel.aggregate([
-        { $match: filter },
-        { $group: { _id: { instrument: '$instrument', granularity: '$granularity' }, count: { $sum: 1 }, oldest: { $min: '$timestamp' }, newest: { $max: '$timestamp' } } },
-        { $sort: { '_id.instrument': 1, '_id.granularity': 1 } },
-      ]);
+      const counts = await D1CandleClient.count(
+        instrument || undefined,
+        granularity || undefined
+      );
 
       res.json({ counts });
     } catch (err: any) {

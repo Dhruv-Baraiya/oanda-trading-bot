@@ -1,6 +1,6 @@
 import type { BrokerAdapter } from '../broker/BrokerAdapter.js';
 import type { CandleGranularity } from '../broker/types.js';
-import { CandleModel } from './models.js';
+import { D1CandleClient } from './D1Client.js';
 
 export async function fetchAndStoreCandles(
   broker: BrokerAdapter,
@@ -10,26 +10,7 @@ export async function fetchAndStoreCandles(
 ): Promise<number> {
   const candles = await broker.getCandles({ instrument, granularity, count });
 
-  let inserted = 0;
-  for (const c of candles) {
-    try {
-      await CandleModel.updateOne(
-        { instrument, granularity, timestamp: new Date(c.timestamp) },
-        {
-          $set: {
-            open: c.open,
-            high: c.high,
-            low: c.low,
-            close: c.close,
-            volume: c.volume,
-          },
-        },
-        { upsert: true }
-      );
-      inserted++;
-    } catch {}
-  }
-
+  const inserted = await D1CandleClient.upsert(instrument, granularity, candles);
   console.log(`Stored ${inserted}/${candles.length} ${granularity} candles for ${instrument}`);
   return inserted;
 }
@@ -54,24 +35,8 @@ export async function fetchHistoricalRange(
 
     if (candles.length === 0) break;
 
-    for (const c of candles) {
-      try {
-        await CandleModel.updateOne(
-          { instrument, granularity, timestamp: new Date(c.timestamp) },
-          {
-            $set: {
-              open: c.open,
-              high: c.high,
-              low: c.low,
-              close: c.close,
-              volume: c.volume,
-            },
-          },
-          { upsert: true }
-        );
-        totalInserted++;
-      } catch {}
-    }
+    const batchInserted = await D1CandleClient.upsert(instrument, granularity, candles);
+    totalInserted += batchInserted;
 
     const lastTimestamp = candles[candles.length - 1].timestamp;
     if (lastTimestamp <= currentFrom) break;

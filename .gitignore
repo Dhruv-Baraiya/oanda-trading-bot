@@ -1,22 +1,52 @@
+# Dependencies
 node_modules/
+.venv/
+venv/
+pnpm-store/
+
+# Build output
 dist/
 build/
-.env
-.env.local
-.env.production
-*.log
-.DS_Store
 coverage/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
 __pycache__/
 *.pyc
-.venv/
+*.pyo
 *.egg-info/
-.idea/
-.vscode/
-*.swp
-*.swo
-venv/
+.pytest_cache/
+
+# ML models (large binaries — train local, store in MongoDB/R2)
 packages/ml-service/models/
 *.weights.h5
 *.meta.npy
 *.keras
+*.h5
+
+# Cloudflare Worker local state
+packages/d1-worker/.wrangler/
+packages/d1-worker/.dev.vars
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-*
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*

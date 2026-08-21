@@ -22,6 +22,10 @@ services:
         sync: false
       - key: ML_SERVICE_URL
         value: https://trading-bot-ml-hv3o.onrender.com
+      - key: D1_WORKER_URL
+        sync: false
+      - key: D1_API_KEY
+        sync: false
 
   - type: web
     name: trading-bot-ml
@@ -32,4 +36,8 @@ services:
     dockerfilePath: ./Dockerfile
     envVars:
       - key: MONGODB_URI
+        sync: false
+      - key: D1_WORKER_URL
+        sync: false
+      - key: D1_API_KEY
         sync: false

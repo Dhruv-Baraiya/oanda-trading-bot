@@ -1,8 +1,9 @@
 import os
+import tempfile
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
-from app.config import TRAINING_CONFIG, MODEL_DIR
+from app.config import TRAINING_CONFIG, MODEL_DIR, MODEL_STORAGE
 
 
 class WeightedSum(keras.layers.Layer):
@@ -63,12 +64,13 @@ def load_universal_model(version: str = "latest") -> keras.Model | None:
         except (ValueError, Exception) as e:
             print(f"[ML] Weight mismatch for local {version}: {e}")
 
+    if MODEL_STORAGE == "r2":
+        return _load_from_r2(version)
     return _load_from_mongo(version)
 
 
 def _load_from_mongo(version: str) -> keras.Model | None:
     from app.data.mongo_client import get_collection
-    import tempfile
 
     doc = get_collection("ml_models").find_one({"name": f"universal-{version}"})
     if not doc:
@@ -92,6 +94,34 @@ def _load_from_mongo(version: str) -> keras.Model | None:
     return model
 
 
+def _load_from_r2(version: str) -> keras.Model | None:
+    from app.data.d1_client import get_model_weights, get_model_meta
+
+    meta = get_model_meta(f"universal-{version}")
+    if not meta:
+        return None
+
+    weights_data = get_model_weights(f"universal-{version}")
+    if not weights_data:
+        return None
+
+    model = build_universal_model(feature_count=meta["feature_count"], lookback=meta["lookback"])
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".weights.h5", delete=False)
+    tmp.write(weights_data)
+    tmp.close()
+    try:
+        model.load_weights(tmp.name)
+    except (ValueError, Exception) as e:
+        os.unlink(tmp.name)
+        print(f"[ML] Weight mismatch for R2 {version}: {e}")
+        return None
+    os.unlink(tmp.name)
+
+    print(f"[ML] Loaded universal-{version} from R2")
+    return model
+
+
 def save_universal_model(model: keras.Model, version: str):
     os.makedirs(MODEL_DIR, exist_ok=True)
     path = os.path.join(MODEL_DIR, f"universal-{version}.weights.h5")
@@ -104,9 +134,14 @@ def save_universal_model(model: keras.Model, version: str):
     model.save_weights(latest_w)
     np.save(os.path.join(MODEL_DIR, "universal-latest.meta.npy"), meta)
 
-    _save_to_mongo(path, meta, version)
-    if version != "latest":
-        _save_to_mongo(latest_w, meta, "latest")
+    if MODEL_STORAGE == "r2":
+        _save_to_r2(path, meta, version)
+        if version != "latest":
+            _save_to_r2(latest_w, meta, "latest")
+    else:
+        _save_to_mongo(path, meta, version)
+        if version != "latest":
+            _save_to_mongo(latest_w, meta, "latest")
 
     return path
 
@@ -129,3 +164,10 @@ def _save_to_mongo(weights_path: str, meta: dict, version: str):
         upsert=True,
     )
     print(f"[ML] Saved universal-{version} to MongoDB ({len(weights_bin)} bytes)")
+
+
+def _save_to_r2(weights_path: str, meta: dict, version: str):
+    from app.data.d1_client import save_model_weights
+
+    save_model_weights(f"universal-{version}", weights_path, meta)
+    print(f"[ML] Saved universal-{version} to R2")
