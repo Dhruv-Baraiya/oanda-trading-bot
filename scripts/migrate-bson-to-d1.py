@@ -48,7 +48,7 @@ def refresh_via_wrangler():
     """Call wrangler whoami to force token refresh, then read from config."""
     import subprocess
     subprocess.run(["npx.cmd", "wrangler", "whoami"], capture_output=True, timeout=30,
-                   cwd=r"D:\project\Bot\oanda-trading-bot\packages\d1-worker")
+                   cwd=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "packages", "d1-worker"))
     return read_token_from_wrangler()
 
 

@@ -1,7 +1,7 @@
 export interface MLPrediction {
   universal: {
-    direction: 'UP' | 'DOWN' | 'FLAT';
-    direction_probabilities: { UP: number; DOWN: number; FLAT: number };
+    direction: 'UP' | 'DOWN';
+    direction_probabilities: { UP: number; DOWN: number };
     magnitude_pips: number;
     inference_time_ms: number;
   } | null;

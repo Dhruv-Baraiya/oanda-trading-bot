@@ -6,7 +6,7 @@ from app.features.normalizer import RollingNormalizer
 
 
 class FeatureExtractor:
-    def __init__(self, lookback: int = 60):
+    def __init__(self, lookback: int = 30):
         self.lookback = lookback
         self.normalizer = RollingNormalizer(window=252)
 

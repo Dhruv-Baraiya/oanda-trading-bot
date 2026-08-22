@@ -9,7 +9,7 @@ from app.features.extractor import FeatureExtractor
 from app.meta.controller import MetaController
 
 router = APIRouter()
-extractor = FeatureExtractor(lookback=60)
+extractor = FeatureExtractor(lookback=30)
 meta = MetaController()
 
 _universal_model = None
@@ -142,8 +142,6 @@ def predict(req: PredictRequest):
         rule_direction=rule_dir,
         universal_probs=[
             universal_result["direction_probabilities"]["UP"],
-            universal_result["direction_probabilities"]["DOWN"],
-            universal_result["direction_probabilities"]["FLAT"],
         ],
         specialist_confidence=spec_conf,
         specialist_size=spec_size,
