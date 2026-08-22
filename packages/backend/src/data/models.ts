@@ -77,7 +77,7 @@ export interface ISignalDoc extends Document {
 
 const signalSchema = new Schema<ISignalDoc>({
   instrument: { type: String, required: true, index: true },
-  direction: { type: String, enum: ['BUY', 'SELL', 'FLAT'], required: true },
+  direction: { type: String, enum: ['BUY', 'SELL', 'FLAT', 'EXIT_LONG', 'EXIT_SHORT'], required: true },
   source: { type: String, required: true },
   strategyId: { type: String, index: true },
   strategyName: String,
