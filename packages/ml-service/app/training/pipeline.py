@@ -25,12 +25,13 @@ class TrainingPipeline:
     ) -> dict:
         self.status = {"state": "loading_data", "progress": 10, "message": "Fetching candles...", "metrics": {}}
 
-        # Fetch data
-        h1 = fetch_candles(self.instrument, "H1", datetime.fromisoformat(train_start), datetime.fromisoformat(val_end))
-        m1 = fetch_candles(self.instrument, "M1", datetime.fromisoformat(train_start), datetime.fromisoformat(val_end))
-        m15 = fetch_candles(self.instrument, "M15", datetime.fromisoformat(train_start), datetime.fromisoformat(val_end))
-        h4 = fetch_candles(self.instrument, "H4", datetime.fromisoformat(train_start), datetime.fromisoformat(val_end))
-        sentiment = fetch_sentiment(self.instrument, "positionBook", datetime.fromisoformat(train_start), datetime.fromisoformat(val_end))
+        start_dt = datetime.fromisoformat(train_start)
+        end_dt = datetime.fromisoformat(val_end)
+        h1 = fetch_candles(self.instrument, "H1", start_dt, end_dt)
+        m1 = None
+        m15 = fetch_candles(self.instrument, "M15", start_dt, end_dt)
+        h4 = fetch_candles(self.instrument, "H4", start_dt, end_dt)
+        sentiment = fetch_sentiment(self.instrument, "positionBook", start_dt, end_dt)
 
         if len(h1) < 1000:
             self.status = {"state": "error", "progress": 0, "message": f"Not enough H1 data: {len(h1)} candles (need 1000+)", "metrics": {}}
@@ -64,8 +65,8 @@ class TrainingPipeline:
         train_mask = h1_dates <= train_end_dt
         val_mask = ~train_mask
 
-        # Fallback: if either split is empty, use 80/20 chronological
-        if val_mask.sum() == 0 or train_mask.sum() == 0:
+        # Fallback: if either split is too small, use 80/20 chronological
+        if val_mask.sum() < 100 or train_mask.sum() < 100:
             split_idx = int(n_samples * 0.8)
             train_mask = np.zeros(n_samples, dtype=bool)
             train_mask[:split_idx] = True
@@ -82,6 +83,9 @@ class TrainingPipeline:
         # Build and train model
         cfg = TRAINING_CONFIG["universal"]
         model = build_universal_model(feature_count=X.shape[2], lookback=X.shape[1])
+
+        up_count = y_dir_train.sum()
+        print(f"[ML] Class distribution — UP: {up_count:.0f}, DOWN: {len(y_dir_train) - up_count:.0f}")
 
         callbacks = [
             keras.callbacks.EarlyStopping(patience=cfg["early_stop_patience"], restore_best_weights=True, monitor="val_direction_accuracy", mode="max"),
@@ -131,11 +135,13 @@ class TrainingPipeline:
     ) -> dict:
         self.status = {"state": "loading_data", "progress": 10, "message": "Fetching candles for specialist...", "metrics": {}}
 
-        h1 = fetch_candles(self.instrument, "H1", datetime.fromisoformat(train_start), datetime.fromisoformat(val_end))
-        m1 = fetch_candles(self.instrument, "M1", datetime.fromisoformat(train_start), datetime.fromisoformat(val_end))
-        m15 = fetch_candles(self.instrument, "M15", datetime.fromisoformat(train_start), datetime.fromisoformat(val_end))
-        h4 = fetch_candles(self.instrument, "H4", datetime.fromisoformat(train_start), datetime.fromisoformat(val_end))
-        sentiment = fetch_sentiment(self.instrument, "positionBook", datetime.fromisoformat(train_start), datetime.fromisoformat(val_end))
+        start_dt = datetime.fromisoformat(train_start)
+        end_dt_s = datetime.fromisoformat(val_end)
+        h1 = fetch_candles(self.instrument, "H1", start_dt, end_dt_s)
+        m1 = None
+        m15 = fetch_candles(self.instrument, "M15", start_dt, end_dt_s)
+        h4 = fetch_candles(self.instrument, "H4", start_dt, end_dt_s)
+        sentiment = fetch_sentiment(self.instrument, "positionBook", start_dt, end_dt_s)
 
         if len(h1) < 1000:
             self.status = {"state": "error", "progress": 0, "message": f"Not enough H1 data: {len(h1)}", "metrics": {}}

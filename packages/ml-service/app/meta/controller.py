@@ -4,8 +4,6 @@ import numpy as np
 class MetaController:
     """Combines rule-based signals with AI predictions."""
 
-    DIRECTION_MAP = {0: "UP", 1: "DOWN", 2: "FLAT"}
-
     def decide(
         self,
         rule_direction: str | None,
@@ -22,70 +20,74 @@ class MetaController:
                 "reasoning": ["ML service unavailable, using rules only"],
             }
 
-        up_prob, down_prob, flat_prob = universal_probs
-        ai_direction = self.DIRECTION_MAP[int(np.argmax(universal_probs))]
-        ai_max_prob = max(universal_probs)
+        # Binary: universal_probs is [up_prob] or [up_prob, down_prob]
+        if len(universal_probs) == 1:
+            up_prob = universal_probs[0]
+        elif len(universal_probs) == 2:
+            up_prob = universal_probs[0]
+        else:
+            up_prob = universal_probs[0]
+
+        ai_direction = "UP" if up_prob > 0.5 else "DOWN"
+        ai_confidence = abs(up_prob - 0.5) * 2
 
         reasoning = []
         spec_conf = specialist_confidence or 0.5
         spec_size = specialist_size or 1.0
 
-        # Decision matrix
         if rule_direction in ("BUY", "SELL"):
             rule_ai_match = (rule_direction == "BUY" and ai_direction == "UP") or \
                             (rule_direction == "SELL" and ai_direction == "DOWN")
 
-            if rule_ai_match and ai_max_prob > 0.54:
+            if rule_ai_match and ai_confidence > 0.08:
                 if spec_conf > 0.6:
                     action = "TRADE"
                     size_factor = min(spec_size, 1.5)
-                    reasoning.append(f"Universal: {ai_direction} {ai_max_prob:.0%} (above threshold)")
+                    reasoning.append(f"Universal: {ai_direction} {up_prob:.0%} (confident)")
                     reasoning.append(f"Specialist: {spec_conf:.0%} confidence")
                     reasoning.append(f"Rule signal agrees — triple confirmation")
                 else:
                     action = "TRADE"
                     size_factor = 0.5
                     reasoning.append(f"Universal agrees but specialist low ({spec_conf:.0%})")
-            elif ai_direction == "FLAT":
+            elif ai_confidence < 0.08:
                 if spec_conf > 0.6:
                     action = "TRADE"
                     size_factor = 0.5
-                    reasoning.append(f"AI neutral, specialist confident — reduced size")
+                    reasoning.append(f"AI neutral ({up_prob:.0%}), specialist confident — reduced size")
                 else:
                     action = "SKIP"
                     size_factor = 0
-                    reasoning.append("AI neutral, specialist low — skip")
+                    reasoning.append(f"AI neutral ({up_prob:.0%}), specialist low — skip")
             else:
                 action = "SKIP"
                 size_factor = 0
                 reasoning.append(f"AI disagrees: {ai_direction} vs rule {rule_direction}")
         elif rule_direction is None or rule_direction == "FLAT":
-            if ai_max_prob > 0.7:
+            if ai_confidence > 0.4:
                 action = "AI_TRADE"
                 direction = "BUY" if ai_direction == "UP" else "SELL"
                 size_factor = 1.0
-                reasoning.append(f"No rule signal but AI high confidence: {ai_direction} {ai_max_prob:.0%}")
-            elif ai_max_prob > 0.6:
+                reasoning.append(f"No rule signal but AI high confidence: {ai_direction} {up_prob:.0%}")
+            elif ai_confidence > 0.2:
                 action = "AI_TRADE"
                 direction = "BUY" if ai_direction == "UP" else "SELL"
                 size_factor = 0.5
-                reasoning.append(f"No rule signal, AI moderate: {ai_direction} {ai_max_prob:.0%}")
+                reasoning.append(f"No rule signal, AI moderate: {ai_direction} {up_prob:.0%}")
             else:
                 action = "NO_TRADE"
                 size_factor = 0
-                reasoning.append(f"No rule signal, AI not confident enough ({ai_max_prob:.0%})")
+                reasoning.append(f"No rule signal, AI not confident enough ({up_prob:.0%})")
         else:
             action = "NO_TRADE"
             size_factor = 0
 
-        # Final confidence
         rule_agrees = 1.0 if rule_direction in ("BUY", "SELL") and \
             ((rule_direction == "BUY" and ai_direction == "UP") or
              (rule_direction == "SELL" and ai_direction == "DOWN")) else 0.0
 
-        final_confidence = 0.4 * ai_max_prob + 0.3 * spec_conf + 0.3 * rule_agrees
+        final_confidence = 0.4 * (0.5 + ai_confidence * 0.5) + 0.3 * spec_conf + 0.3 * rule_agrees
 
-        # Confidence-based size scaling
         if final_confidence < 0.5:
             conf_scale = 0.5
         elif final_confidence < 0.7:
@@ -101,7 +103,7 @@ class MetaController:
             "confidence": round(final_confidence, 4),
             "size_factor": round(size_factor * conf_scale, 4),
             "ai_direction": ai_direction,
-            "ai_probability": round(ai_max_prob, 4),
+            "ai_probability": round(up_prob, 4),
             "specialist_confidence": round(spec_conf, 4),
             "reasoning": reasoning,
         }

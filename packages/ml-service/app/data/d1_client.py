@@ -19,7 +19,8 @@ def fetch_candles_d1(
     end: datetime | None = None,
     limit: int | None = None,
 ) -> pd.DataFrame:
-    params = {"instrument": instrument, "granularity": granularity}
+    PAGE_SIZE = 10000
+    params: dict = {"instrument": instrument, "granularity": granularity, "limit": str(PAGE_SIZE)}
     if start:
         params["from"] = start.isoformat()
     if end:
@@ -27,16 +28,28 @@ def fetch_candles_d1(
     if limit:
         params["limit"] = str(limit)
 
-    resp = requests.get(f"{D1_WORKER_URL}/candles", params=params, headers=HEADERS, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
+    all_records: list = []
+    offset = 0
 
-    records = data.get("candles", [])
-    if not records:
+    while True:
+        params["offset"] = str(offset)
+        resp = requests.get(f"{D1_WORKER_URL}/candles", params=params, headers=HEADERS, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        records = data.get("candles", [])
+        if not records:
+            break
+        all_records.extend(records)
+        if limit or len(records) < PAGE_SIZE:
+            break
+        offset += PAGE_SIZE
+        print(f"[D1] Fetched {len(all_records)} {granularity} candles so far...")
+
+    if not all_records:
         return pd.DataFrame()
 
-    df = pd.DataFrame(records)
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df = pd.DataFrame(all_records)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, format="ISO8601").dt.tz_localize(None)
     df = df.set_index("timestamp")
     df = df[["open", "high", "low", "close", "volume"]].astype(float)
     return df

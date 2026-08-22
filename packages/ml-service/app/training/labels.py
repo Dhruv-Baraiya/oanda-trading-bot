@@ -5,11 +5,10 @@ import pandas as pd
 def generate_direction_labels(
     h1: pd.DataFrame,
     horizon: int = 12,
-    threshold_atr_mult: float = 0.7,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Generate direction (3-class) and magnitude labels using max-excursion method.
-    Looks at actual price path over horizon, not just endpoint.
-    Returns (direction_onehot, magnitude) aligned with h1 index."""
+    """Generate binary direction (UP/DOWN) and magnitude labels.
+    UP = close[i+horizon] > close[i], DOWN = otherwise.
+    Returns (direction_binary, magnitude) aligned with h1 index."""
 
     close = h1["close"].values
     high = h1["high"].values
@@ -24,29 +23,18 @@ def generate_direction_labels(
     atr = pd.Series(tr).rolling(14).mean().values
 
     n = len(close)
-    directions = np.zeros((n, 3))  # [UP, DOWN, FLAT]
+    directions = np.zeros(n)
     magnitudes = np.zeros(n)
 
     for i in range(n - horizon):
-        if atr[i] <= 0 or np.isnan(atr[i]):
-            directions[i] = [0, 0, 1]
+        if np.isnan(atr[i]) or atr[i] <= 0:
             continue
 
-        entry = close[i]
-        threshold = threshold_atr_mult * atr[i]
+        future_close = close[min(i + horizon, n - 1)]
+        directions[i] = 1.0 if future_close > close[i] else 0.0
 
-        max_up = max(high[i+1:i+horizon+1]) - entry
-        max_down = entry - min(low[i+1:i+horizon+1])
-
-        if max_up > threshold and max_up > max_down * 1.3:
-            directions[i] = [1, 0, 0]  # UP — clear upward excursion
-        elif max_down > threshold and max_down > max_up * 1.3:
-            directions[i] = [0, 1, 0]  # DOWN — clear downward excursion
-        else:
-            directions[i] = [0, 0, 1]  # FLAT — choppy or no clear direction
-
-        net_move = (close[min(i + horizon, n - 1)] - entry) / entry
-        magnitudes[i] = net_move / atr[i]
+        net_move = (future_close - close[i]) / close[i]
+        magnitudes[i] = np.clip(net_move / atr[i], -3, 3)
 
     valid = n - horizon
     return directions[:valid], magnitudes[:valid]
@@ -113,7 +101,6 @@ def generate_specialist_labels_synthetic(
         tp_dist = sl_dist * tp_ratio
         entry = close[i]
 
-        # Simulate long trade
         long_hit_tp = False
         long_hit_sl = False
         for j in range(1, horizon + 1):
@@ -126,7 +113,6 @@ def generate_specialist_labels_synthetic(
                 long_hit_sl = True
                 break
 
-        # Simulate short trade
         short_hit_tp = False
         short_hit_sl = False
         for j in range(1, horizon + 1):
@@ -139,7 +125,6 @@ def generate_specialist_labels_synthetic(
                 short_hit_sl = True
                 break
 
-        # Best outcome determines confidence
         if long_hit_tp or short_hit_tp:
             confidence[i] = 1.0
             move = abs(close[min(i + horizon, n - 1)] - entry)

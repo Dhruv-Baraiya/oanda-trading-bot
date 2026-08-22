@@ -37,13 +37,13 @@ def build_universal_model(feature_count: int = 49, lookback: int = 60) -> keras.
     x = keras.layers.Dense(cfg["dense_units"], activation="relu")(x)
     x = keras.layers.Dropout(cfg["dropout"])(x)
 
-    direction_out = keras.layers.Dense(3, activation="softmax", name="direction")(x)
+    direction_out = keras.layers.Dense(1, activation="sigmoid", name="direction")(x)
     magnitude_out = keras.layers.Dense(1, activation="linear", name="magnitude")(x)
 
     model = keras.Model(inputs=inputs, outputs=[direction_out, magnitude_out])
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=cfg["initial_lr"]),
-        loss={"direction": "categorical_crossentropy", "magnitude": "mse"},
+        loss={"direction": "binary_crossentropy", "magnitude": "mse"},
         loss_weights=cfg["loss_weights"],
         metrics={"direction": "accuracy"},
     )

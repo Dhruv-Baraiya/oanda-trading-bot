@@ -99,15 +99,16 @@ def predict(req: PredictRequest):
     dir_probs, magnitude = universal.predict(X, verbose=0)
     uni_time = int((time.time() - uni_start) * 1000)
 
-    direction_map = {0: "UP", 1: "DOWN", 2: "FLAT"}
-    pred_dir = direction_map[int(np.argmax(dir_probs[0]))]
+    up_prob = float(dir_probs[0][0])
+    pred_dir = "UP" if up_prob > 0.5 else "DOWN"
+    confidence = abs(up_prob - 0.5) * 2
 
     universal_result = {
         "direction": pred_dir,
+        "confidence": round(confidence, 4),
         "direction_probabilities": {
-            "UP": round(float(dir_probs[0][0]), 4),
-            "DOWN": round(float(dir_probs[0][1]), 4),
-            "FLAT": round(float(dir_probs[0][2]), 4),
+            "UP": round(up_prob, 4),
+            "DOWN": round(1 - up_prob, 4),
         },
         "magnitude_pips": round(float(magnitude[0][0]) * 10000, 1),
         "inference_time_ms": uni_time,

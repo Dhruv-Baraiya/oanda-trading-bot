@@ -68,26 +68,26 @@ class FeatureExtractor:
         cols = ["m15_ret_1", "m15_ret_2", "m15_ret_3", "m15_ret_4",
                 "m15_vol_ratio", "m15_range_ratio"]
         result = pd.DataFrame(np.zeros((len(h1), 6)), index=h1.index, columns=cols)
-        m15_returns = m15["close"].pct_change().values
-        m15_idx = m15.index.values
-        m15_vol = m15["volume"].values
-        m15_range = ((m15["high"] - m15["low"]) / m15["close"]).values
-        h1_idx = h1.index.values
 
-        for i in range(len(h1_idx)):
-            mask = m15_idx < h1_idx[i]
-            valid = mask.sum()
-            if valid < 5:
-                continue
-            start = max(0, valid - 4)
-            rets = m15_returns[start:valid]
-            for j in range(len(rets)):
-                result.iloc[i, j] = rets[-(j + 1)] if j < len(rets) else 0
-            recent_vol = m15_vol[max(0, valid - 4):valid]
-            older_vol = m15_vol[max(0, valid - 20):max(0, valid - 4)]
-            result.iloc[i, 4] = recent_vol.mean() / older_vol.mean() if len(older_vol) > 0 and older_vol.mean() > 0 else 1.0
-            recent_range = m15_range[max(0, valid - 4):valid]
-            result.iloc[i, 5] = recent_range.mean()
+        m15_returns = m15["close"].pct_change()
+        m15_range = (m15["high"] - m15["low"]) / m15["close"]
+
+        # Resample M15 to hourly — last 4 M15 candles per hour
+        for lag in range(4):
+            shifted = m15_returns.shift(lag)
+            hourly = shifted.resample("1h").last()
+            aligned = hourly.reindex(h1.index, method="ffill").fillna(0)
+            result[f"m15_ret_{lag + 1}"] = aligned.values
+
+        recent_vol = m15["volume"].rolling(4).mean()
+        older_vol = m15["volume"].rolling(20).mean()
+        vol_ratio = (recent_vol / older_vol.replace(0, np.nan)).fillna(1.0)
+        hourly_vr = vol_ratio.resample("1h").last()
+        result["m15_vol_ratio"] = hourly_vr.reindex(h1.index, method="ffill").fillna(1.0).values
+
+        range_mean = m15_range.rolling(4).mean()
+        hourly_rm = range_mean.resample("1h").last()
+        result["m15_range_ratio"] = hourly_rm.reindex(h1.index, method="ffill").fillna(0).values
 
         return result
 
@@ -96,26 +96,31 @@ class FeatureExtractor:
 
         h4_ema20 = h4["close"].ewm(span=20).mean()
         h4_ema50 = h4["close"].ewm(span=50).mean()
-        h4_range = h4["high"] - h4["low"]
+        h4_range_val = h4["high"] - h4["low"]
+        h4_atr = h4_range_val.rolling(14).mean()
+
+        # H4 RSI
+        h4_delta = h4["close"].diff()
+        h4_gain = h4_delta.where(h4_delta > 0, 0).rolling(14).mean()
+        h4_loss = (-h4_delta.where(h4_delta < 0, 0)).rolling(14).mean()
+        h4_rs = h4_gain / h4_loss.replace(0, np.nan)
+        h4_rsi = 100 - (100 / (1 + h4_rs))
+
+        h4_trend = (h4_ema20 > h4_ema50).astype(float) * 2 - 1
+        h4_high = h4["high"]
+        h4_low = h4["low"]
+        h4_pos = (h4["close"] - h4_low) / (h4_high - h4_low).replace(0, np.nan)
+        h4_pos = h4_pos.fillna(0.5)
 
         h1_atr = (h1["high"] - h1["low"]).rolling(14).mean()
+        h4_atr_ratio = h4_atr / h1_atr.reindex(h4.index, method="ffill").replace(0, np.nan)
+        h4_atr_ratio = h4_atr_ratio.fillna(1.0)
 
-        for i, ts in enumerate(h1.index):
-            h4_prior = h4[h4.index <= ts]
-            if len(h4_prior) < 2:
-                continue
-            last = h4_prior.iloc[-1]
-            idx = h4_prior.index[-1]
-            h_range = last["high"] - last["low"]
-            result.iloc[i, 0] = (h1.iloc[i]["close"] - last["low"]) / h_range if h_range > 0 else 0.5
-            result.iloc[i, 1] = 1.0 if h4_ema20.get(idx, 0) > h4_ema50.get(idx, 0) else -1.0
-            # Simplified RSI for H4
-            changes = h4_prior["close"].diff().tail(14)
-            gains = changes[changes > 0].sum()
-            losses = abs(changes[changes < 0].sum())
-            result.iloc[i, 2] = (gains / (gains + losses)) * 100 if (gains + losses) > 0 else 50
-            h4_atr = h4_range.tail(14).mean()
-            result.iloc[i, 3] = h4_atr / h1_atr.iloc[i] if h1_atr.iloc[i] > 0 else 1.0
+        # Forward-fill H4 values to H1 index
+        result["h4_position"] = h4_pos.reindex(h1.index, method="ffill").fillna(0.5).values
+        result["h4_trend"] = h4_trend.reindex(h1.index, method="ffill").fillna(0).values
+        result["h4_rsi"] = h4_rsi.reindex(h1.index, method="ffill").fillna(50).values
+        result["h4_atr_ratio"] = h4_atr_ratio.reindex(h1.index, method="ffill").fillna(1.0).values
 
         return result
 

@@ -87,7 +87,7 @@ async function handleGetCandles(url: URL, env: Env): Promise<Response> {
 
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
-  const limit = parseInt(url.searchParams.get("limit") || "5000");
+  const limit = parseInt(url.searchParams.get("limit") || "10000");
   const offset = parseInt(url.searchParams.get("offset") || "0");
 
   let query = "SELECT * FROM candles WHERE instrument = ? AND granularity = ?";
