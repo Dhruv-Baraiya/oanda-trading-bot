@@ -145,10 +145,8 @@ async function start() {
     try {
       await dataCollector.start();
       console.log('[Boot] DataCollector auto-started');
-      await autoTrader.start();
-      console.log('[Boot] AutoTrader auto-started');
     } catch (err: any) {
-      console.error(`[Boot] Auto-start failed: ${err.message}`);
+      console.error(`[Boot] DataCollector auto-start failed: ${err.message}`);
     }
   });
 }
