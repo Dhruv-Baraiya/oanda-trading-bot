@@ -5,15 +5,26 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from app.models.universal import load_universal_model
 from app.models.specialist import load_specialist_model
+from app.models.lgbm_model import load_lgbm_model
 from app.features.extractor import FeatureExtractor
+from app.features.flat_extractor import FlatFeatureExtractor
 from app.meta.controller import MetaController
 
 router = APIRouter()
-extractor = FeatureExtractor(lookback=20)
+lstm_extractor = FeatureExtractor(lookback=20)
+flat_extractor = FlatFeatureExtractor()
 meta = MetaController()
 
+_lgbm_model = None
 _universal_model = None
 _specialist_models: dict = {}
+
+
+def get_lgbm():
+    global _lgbm_model
+    if _lgbm_model is None:
+        _lgbm_model = load_lgbm_model("universal-lgbm", "latest")
+    return _lgbm_model
 
 
 def get_universal():
@@ -61,56 +72,66 @@ def _candles_to_df(candles: list[CandleData]) -> pd.DataFrame:
 def predict(req: PredictRequest):
     start = time.time()
 
-    universal = get_universal()
+    lgbm = get_lgbm()
     specialist = get_specialist(req.instrument)
 
-    if universal is None:
-        return {
-            "universal": None,
-            "specialist": None,
-            "meta": meta.decide(
-                rule_direction=req.rule_signal.get("direction") if req.rule_signal else None,
-                universal_probs=None,
-            ),
-            "message": "No trained model found. Train first via POST /train",
-        }
-
     h1 = _candles_to_df(req.candles_h1)
-    m1 = _candles_to_df(req.candles_m1) if req.candles_m1 else None
-    m15 = _candles_to_df(req.candles_m15) if req.candles_m15 else None
-    h4 = _candles_to_df(req.candles_h4) if req.candles_h4 else None
+    rule_dir = req.rule_signal.get("direction") if req.rule_signal else None
 
-    features = extractor.extract(h1, m1, m15, h4)
+    # Primary: LightGBM (if available)
+    if lgbm is not None:
+        uni_start = time.time()
+        features = flat_extractor.extract(h1)
+        if len(features) < 1:
+            return {"error": "Not enough candle data"}
 
-    if len(features) == 0:
-        return {"error": "Not enough candle data for prediction (need 60+ H1 candles)"}
+        X = features.iloc[[-1]].values.astype(np.float32)
+        expected = lgbm.n_features_in_
+        if X.shape[1] < expected:
+            X = np.pad(X, ((0, 0), (0, expected - X.shape[1])), mode='constant')
+        elif X.shape[1] > expected:
+            X = X[:, :expected]
 
-    # Use last window, pad to match model input if needed
-    X = features[-1:].astype(np.float32)
-    expected_features = universal.input_shape[2]
-    if X.shape[2] < expected_features:
-        pad_width = expected_features - X.shape[2]
-        X = np.pad(X, ((0, 0), (0, 0), (0, pad_width)), mode='constant')
-    elif X.shape[2] > expected_features:
-        X = X[:, :, :expected_features]
+        up_prob = float(lgbm.predict_proba(X)[0][1])
+        uni_time = int((time.time() - uni_start) * 1000)
+    else:
+        # Fallback: LSTM
+        universal = get_universal()
+        if universal is None:
+            return {
+                "universal": None, "specialist": None,
+                "meta": meta.decide(rule_direction=rule_dir, universal_probs=None),
+                "message": "No trained model found",
+            }
 
-    # Universal prediction
-    uni_start = time.time()
-    dir_probs, magnitude = universal.predict(X, verbose=0)
-    uni_time = int((time.time() - uni_start) * 1000)
+        m1 = _candles_to_df(req.candles_m1) if req.candles_m1 else None
+        m15 = _candles_to_df(req.candles_m15) if req.candles_m15 else None
+        h4 = _candles_to_df(req.candles_h4) if req.candles_h4 else None
+        features = lstm_extractor.extract(h1, m1, m15, h4)
 
-    up_prob = float(dir_probs[0][0])
+        if len(features) == 0:
+            return {"error": "Not enough candle data for prediction"}
+
+        X = features[-1:].astype(np.float32)
+        expected = universal.input_shape[2]
+        if X.shape[2] < expected:
+            X = np.pad(X, ((0, 0), (0, 0), (0, expected - X.shape[2])), mode='constant')
+        elif X.shape[2] > expected:
+            X = X[:, :, :expected]
+
+        uni_start = time.time()
+        dir_probs, magnitude = universal.predict(X, verbose=0)
+        up_prob = float(dir_probs[0][0])
+        uni_time = int((time.time() - uni_start) * 1000)
+
     pred_dir = "UP" if up_prob > 0.5 else "DOWN"
     confidence = abs(up_prob - 0.5) * 2
 
     universal_result = {
         "direction": pred_dir,
         "confidence": round(confidence, 4),
-        "direction_probabilities": {
-            "UP": round(up_prob, 4),
-            "DOWN": round(1 - up_prob, 4),
-        },
-        "magnitude_pips": round(float(magnitude[0][0]) * 10000, 1),
+        "direction_probabilities": {"UP": round(up_prob, 4), "DOWN": round(1 - up_prob, 4)},
+        "model_type": "lgbm" if lgbm is not None else "lstm",
         "inference_time_ms": uni_time,
     }
 
@@ -120,38 +141,34 @@ def predict(req: PredictRequest):
     spec_size = None
     if specialist is not None:
         spec_start = time.time()
-        X_spec = X
-        spec_features = specialist.input_shape[2]
-        if X_spec.shape[2] < spec_features:
-            X_spec = np.pad(X_spec, ((0, 0), (0, 0), (0, spec_features - X_spec.shape[2])), mode='constant')
-        elif X_spec.shape[2] > spec_features:
-            X_spec = X_spec[:, :, :spec_features]
-        conf, size = specialist.predict(X_spec, verbose=0)
-        spec_time = int((time.time() - spec_start) * 1000)
-        spec_conf = float(conf[0][0])
-        spec_size = float(size[0][0])
-        specialist_result = {
-            "signal_confidence": round(spec_conf, 4),
-            "size_multiplier": round(max(0.5, min(2.0, spec_size)), 4),
-            "inference_time_ms": spec_time,
-        }
+        spec_features = lstm_extractor.extract(h1, None, None, None)
+        if len(spec_features) > 0:
+            X_spec = spec_features[-1:].astype(np.float32)
+            sf = specialist.input_shape[2]
+            if X_spec.shape[2] < sf:
+                X_spec = np.pad(X_spec, ((0, 0), (0, 0), (0, sf - X_spec.shape[2])), mode='constant')
+            elif X_spec.shape[2] > sf:
+                X_spec = X_spec[:, :, :sf]
+            conf, size = specialist.predict(X_spec, verbose=0)
+            spec_time = int((time.time() - spec_start) * 1000)
+            spec_conf = float(conf[0][0])
+            spec_size = float(size[0][0])
+            specialist_result = {
+                "signal_confidence": round(spec_conf, 4),
+                "size_multiplier": round(max(0.5, min(2.0, spec_size)), 4),
+                "inference_time_ms": spec_time,
+            }
 
-    # Meta decision
-    rule_dir = req.rule_signal.get("direction") if req.rule_signal else None
     meta_result = meta.decide(
         rule_direction=rule_dir,
-        universal_probs=[
-            universal_result["direction_probabilities"]["UP"],
-        ],
+        universal_probs=[universal_result["direction_probabilities"]["UP"]],
         specialist_confidence=spec_conf,
         specialist_size=spec_size,
     )
-
-    total_time = int((time.time() - start) * 1000)
 
     return {
         "universal": universal_result,
         "specialist": specialist_result,
         "meta": meta_result,
-        "inference_time_ms": total_time,
+        "inference_time_ms": int((time.time() - start) * 1000),
     }
