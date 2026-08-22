@@ -21,6 +21,8 @@ import { createDataCollectorRoutes } from './routes/datacollector.js';
 import { createMigrateRoutes } from './routes/migrate.js';
 import { connectDB } from './data/db.js';
 import { setupPriceStream } from './websocket/priceStream.js';
+import { NewsBlackout } from './risk/NewsBlackout.js';
+import { EmailAlert } from './alerts/EmailAlert.js';
 
 // Load .env: Docker sets env vars directly; local dev reads from repo root
 const envPath = process.env.NODE_ENV === 'production'
@@ -82,6 +84,40 @@ autoTrader.on('decision', (decision) => {
 autoTrader.on('trade', (data) => {
   io.emit('autoTrade', data);
   console.log(`[AutoTrader] ${data.type}: ${data.strategy} — ${JSON.stringify(data.order ?? data.result)}`);
+
+  const alert = EmailAlert.getInstance();
+  if (data.type === 'entry' && data.order) {
+    const o = data.order;
+    alert.sendAlert(
+      `Trade Opened: ${o.instrument || data.strategy}`,
+      `Direction: ${data.signal?.direction}\nUnits: ${o.units}\nPrice: ${o.price}\nSL: ${o.stopLoss}\nTP: ${o.takeProfit}\nStrategy: ${data.strategy}`,
+      'trade_entry'
+    );
+  } else if (data.type === 'exit' && data.result) {
+    const r = data.result;
+    alert.sendAlert(
+      `Trade Closed: ${r.instrument || data.strategy}`,
+      `P&L: ${r.pl}\nExit price: ${r.price}\nReason: ${r.exitReason || 'signal'}\nStrategy: ${data.strategy}`,
+      'trade_exit'
+    );
+  }
+});
+
+riskEngine.on('circuit-breaker', (data: { tripped: boolean; reason: string | null }) => {
+  if (data.tripped) {
+    EmailAlert.getInstance().sendAlert(
+      `Circuit Breaker TRIPPED`,
+      `Reason: ${data.reason}\nTime: ${new Date().toISOString()}\nTrading halted until reset.`,
+      'circuit_breaker'
+    );
+  }
+});
+
+autoTrader.on('status', (status) => {
+  const alert = EmailAlert.getInstance();
+  if (status.running && status.evaluationCount === 0) {
+    alert.sendAlert('Bot Started', `Started at ${status.startedAt}\nStrategies: ${status.activeStrategies}\nML: ${status.mlEnabled}`, 'bot_start');
+  }
 });
 
 app.use('/api/autotrader', createAutoTraderRoutes(autoTrader));
@@ -96,6 +132,10 @@ async function start() {
   } catch (err: any) {
     console.warn(`MongoDB not connected (${err.message}) — strategies will not persist`);
   }
+
+  NewsBlackout.getInstance().start().catch(err =>
+    console.warn(`[NewsBlackout] Start failed: ${err.message}`)
+  );
 
   httpServer.listen(PORT, () => {
     console.log(`Trading bot API running on port ${PORT}`);

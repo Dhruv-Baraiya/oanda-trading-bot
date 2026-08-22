@@ -1,7 +1,17 @@
 import type { AccountSummary, PriceUpdate } from '../broker/types.js';
 import type { RiskLimits, RiskState, RiskCheckResult } from './types.js';
 import { DEFAULT_RISK_LIMITS } from './types.js';
+import { NewsBlackout } from './NewsBlackout.js';
 import { EventEmitter } from 'events';
+
+const CORRELATION_GROUPS: Record<string, string[]> = {
+  USD_MAJORS: ['EUR_USD', 'GBP_USD', 'USD_JPY', 'USD_CHF', 'AUD_USD', 'NZD_USD', 'USD_CAD'],
+  EUR_CROSSES: ['EUR_GBP', 'EUR_JPY', 'EUR_CHF', 'EUR_AUD'],
+  GBP_CROSSES: ['GBP_JPY', 'GBP_CHF', 'GBP_AUD'],
+  COMMODITY: ['AUD_USD', 'NZD_USD', 'USD_CAD'],
+};
+
+const USD_BASE_PAIRS = new Set(['USD_JPY', 'USD_CHF', 'USD_CAD']);
 
 export class RiskEngine extends EventEmitter {
   private limits: RiskLimits;
@@ -54,7 +64,12 @@ export class RiskEngine extends EventEmitter {
     this.lastTickTime = Date.now();
   }
 
-  checkEntryAllowed(spreadPips?: number): RiskCheckResult {
+  checkEntryAllowed(
+    spreadPips?: number,
+    instrument?: string,
+    direction?: string,
+    openTrades?: Array<{ instrument: string; units: number }>
+  ): RiskCheckResult {
     const state = this.getState();
 
     if (this.circuitBreakerTripped) {
@@ -63,6 +78,13 @@ export class RiskEngine extends EventEmitter {
 
     if (!this.isStreamHealthy()) {
       return { allowed: false, reason: 'Stream unhealthy — no tick received recently', riskState: state };
+    }
+
+    if (instrument) {
+      const newsCheck = NewsBlackout.getInstance().checkNewsBlackout(instrument);
+      if (newsCheck.blocked) {
+        return { allowed: false, reason: newsCheck.reason, riskState: state };
+      }
     }
 
     const dailyLossPercent = this.startOfDayBalance > 0
@@ -94,7 +116,53 @@ export class RiskEngine extends EventEmitter {
       return { allowed: false, reason: `Spread too wide: ${spreadPips.toFixed(1)} pips`, riskState: state };
     }
 
+    if (instrument && direction && openTrades) {
+      const corrCheck = this.checkCorrelation(instrument, direction, openTrades);
+      if (corrCheck) {
+        return { allowed: false, reason: corrCheck, riskState: state };
+      }
+    }
+
     return { allowed: true, reason: null, riskState: state };
+  }
+
+  private checkCorrelation(
+    instrument: string,
+    direction: string,
+    openTrades: Array<{ instrument: string; units: number }>
+  ): string | null {
+    const groups = Object.entries(CORRELATION_GROUPS)
+      .filter(([, pairs]) => pairs.includes(instrument))
+      .map(([name]) => name);
+
+    if (groups.length === 0) return null;
+
+    const isBuyingUsd = (pair: string, dir: string): boolean => {
+      if (USD_BASE_PAIRS.has(pair)) return dir === 'BUY';
+      return dir === 'SELL';
+    };
+
+    const newTradeUsdBias = isBuyingUsd(instrument, direction);
+
+    for (const group of groups) {
+      const groupPairs = CORRELATION_GROUPS[group];
+      let correlatedCount = 0;
+
+      for (const trade of openTrades) {
+        if (!groupPairs.includes(trade.instrument)) continue;
+        const tradeDir = trade.units > 0 ? 'BUY' : 'SELL';
+        const tradeUsdBias = isBuyingUsd(trade.instrument, tradeDir);
+        if (tradeUsdBias === newTradeUsdBias) {
+          correlatedCount++;
+        }
+      }
+
+      if (correlatedCount >= this.limits.maxCorrelatedPositions) {
+        return `Correlation limit: ${correlatedCount} same-direction trades in ${group} (max ${this.limits.maxCorrelatedPositions})`;
+      }
+    }
+
+    return null;
   }
 
   checkSignalFreshness(signalTimestamp: string): boolean {

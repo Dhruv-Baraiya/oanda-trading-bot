@@ -186,7 +186,7 @@ export class AutoTrader extends EventEmitter {
             const sameInstrumentTrades = openTrades.filter(t => t.instrument === strategy.instrument);
             if (sameInstrumentTrades.length >= strategy.maxOpenTrades) return;
 
-            const riskCheck = this.riskEngine.checkEntryAllowed();
+            const riskCheck = this.riskEngine.checkEntryAllowed(undefined, strategy.instrument, aiDirection, openTrades);
             if (!riskCheck.allowed) return;
 
             const aiSignal = {
@@ -246,8 +246,9 @@ export class AutoTrader extends EventEmitter {
         acted: false,
       });
 
+      const openTrades = await this.broker.getOpenTrades();
+
       if (signal.direction === 'BUY' || signal.direction === 'SELL') {
-        const openTrades = await this.broker.getOpenTrades();
         const sameInstrumentTrades = openTrades.filter(t => t.instrument === strategy.instrument);
         if (sameInstrumentTrades.length >= strategy.maxOpenTrades) {
           await this.log('EVALUATION_SKIP', {
@@ -274,7 +275,7 @@ export class AutoTrader extends EventEmitter {
         return;
       }
 
-      const riskCheck = this.riskEngine.checkEntryAllowed();
+      const riskCheck = this.riskEngine.checkEntryAllowed(undefined, strategy.instrument, signal.direction, openTrades);
 
       if (!riskCheck.allowed) {
         await this.log('RISK_CHECK_FAILED', {

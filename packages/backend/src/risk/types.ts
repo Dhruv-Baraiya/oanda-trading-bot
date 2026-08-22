@@ -5,6 +5,7 @@ export interface RiskLimits {
   maxDrawdown: number;           // 0.10 = 10%
   maxOpenTrades: number;         // 3
   maxSpreadPips: number;         // 3.0 — reject if spread exceeds
+  maxCorrelatedPositions: number; // 2 — max same-direction trades in a correlation group
   staleSignalSeconds: number;    // 5
   staleTickSeconds: number;      // 5
 }
@@ -36,6 +37,7 @@ export const DEFAULT_RISK_LIMITS: RiskLimits = {
   maxDrawdown: 0.10,
   maxOpenTrades: 3,
   maxSpreadPips: 3.0,
+  maxCorrelatedPositions: 2,
   staleSignalSeconds: 5,
   staleTickSeconds: 5,
 };
