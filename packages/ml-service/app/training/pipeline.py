@@ -44,12 +44,10 @@ class TrainingPipeline:
         # Extract features
         features = self.extractor.extract(h1, m1, m15, h4, sentiment)
 
-        # Generate labels
-        directions, magnitudes = generate_direction_labels(h1)
+        # Generate labels with noise filtering
+        directions, magnitudes, label_valid = generate_direction_labels(h1)
 
         lookback = TRAINING_CONFIG["universal"]["lookback_window"]
-        # Align: features start at index `lookback`, labels from 0
-        # After windowing, features[i] corresponds to h1[lookback + i]
         n_samples = min(len(features), len(directions) - lookback)
         if n_samples <= 0:
             self.status = {"state": "error", "progress": 0, "message": "Not enough aligned samples", "metrics": {}}
@@ -58,14 +56,21 @@ class TrainingPipeline:
         X = features[:n_samples]
         y_dir = directions[lookback:lookback + n_samples]
         y_mag = magnitudes[lookback:lookback + n_samples]
+        sig_mask = label_valid[lookback:lookback + n_samples]
+
+        total_before = n_samples
+        X = X[sig_mask]
+        y_dir = y_dir[sig_mask]
+        y_mag = y_mag[sig_mask]
+        h1_dates_filtered = h1.index[lookback:lookback + total_before][sig_mask]
+        n_samples = len(X)
+        print(f"[ML] Label filter: {total_before} → {n_samples} ({total_before - n_samples} noisy samples removed)")
 
         # Split train/val by date (chronological, no shuffle)
         train_end_dt = datetime.fromisoformat(train_end)
-        h1_dates = h1.index[lookback:lookback + n_samples]
-        train_mask = h1_dates <= train_end_dt
+        train_mask = h1_dates_filtered <= train_end_dt
         val_mask = ~train_mask
 
-        # Fallback: if either split is too small, use 80/20 chronological
         if val_mask.sum() < 100 or train_mask.sum() < 100:
             split_idx = int(n_samples * 0.8)
             train_mask = np.zeros(n_samples, dtype=bool)

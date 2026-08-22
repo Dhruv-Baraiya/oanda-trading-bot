@@ -31,7 +31,7 @@ INSTRUMENT_REGISTRY = {
 TRAINING_CONFIG = {
     "universal": {
         "lookback_window": 30,
-        "feature_count": 44,
+        "feature_count": 52,
         "lstm_layers": [32, 16],
         "attention": False,
         "dropout": 0.4,
@@ -45,7 +45,7 @@ TRAINING_CONFIG = {
     },
     "specialist": {
         "lookback_window": 60,
-        "feature_count": 44,
+        "feature_count": 52,
         "lstm_layers": [64, 32],
         "attention": False,
         "dropout": 0.2,

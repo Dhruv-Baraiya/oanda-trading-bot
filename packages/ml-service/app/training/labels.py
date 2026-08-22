@@ -5,10 +5,11 @@ import pandas as pd
 def generate_direction_labels(
     h1: pd.DataFrame,
     horizon: int = 12,
-) -> tuple[np.ndarray, np.ndarray]:
+    min_atr_move: float = 0.3,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Generate binary direction (UP/DOWN) and magnitude labels.
-    UP = close[i+horizon] > close[i], DOWN = otherwise.
-    Returns (direction_binary, magnitude) aligned with h1 index."""
+    Filters out noisy samples where move < min_atr_move * ATR.
+    Returns (direction_binary, magnitude, valid_mask) aligned with h1 index."""
 
     close = h1["close"].values
     high = h1["high"].values
@@ -25,19 +26,26 @@ def generate_direction_labels(
     n = len(close)
     directions = np.zeros(n)
     magnitudes = np.zeros(n)
+    valid_mask = np.zeros(n, dtype=bool)
 
     for i in range(n - horizon):
         if np.isnan(atr[i]) or atr[i] <= 0:
             continue
 
         future_close = close[min(i + horizon, n - 1)]
+        abs_move = abs(future_close - close[i])
+
+        if abs_move < min_atr_move * atr[i]:
+            continue
+
+        valid_mask[i] = True
         directions[i] = 1.0 if future_close > close[i] else 0.0
 
         net_move = (future_close - close[i]) / close[i]
         magnitudes[i] = np.clip(net_move / atr[i], -3, 3)
 
     valid = n - horizon
-    return directions[:valid], magnitudes[:valid]
+    return directions[:valid], magnitudes[:valid], valid_mask[:valid]
 
 
 def generate_specialist_labels_from_trades(trades: list[dict]) -> tuple[np.ndarray, np.ndarray]:

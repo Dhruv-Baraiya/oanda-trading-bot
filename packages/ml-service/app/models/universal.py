@@ -6,33 +6,21 @@ from tensorflow import keras
 from app.config import TRAINING_CONFIG, MODEL_DIR, MODEL_STORAGE
 
 
-class WeightedSum(keras.layers.Layer):
-    def call(self, inputs):
-        return tf.reduce_sum(inputs, axis=1)
-
-    def compute_output_shape(self, input_shape):
-        return (input_shape[0], input_shape[2])
-
-
 def build_universal_model(feature_count: int = 49, lookback: int = 60) -> keras.Model:
     cfg = TRAINING_CONFIG["universal"]
 
     inputs = keras.Input(shape=(lookback, feature_count), name="candle_input")
 
-    x = keras.layers.LSTM(cfg["lstm_layers"][0], return_sequences=True, dropout=cfg["dropout"])(inputs)
-    x = keras.layers.LSTM(cfg["lstm_layers"][1], return_sequences=True, dropout=cfg["dropout"])(x)
+    # CNN front-end: captures local patterns (candlestick formations)
+    x = keras.layers.Conv1D(32, kernel_size=3, padding="causal", activation="relu")(inputs)
+    x = keras.layers.BatchNormalization()(x)
+    x = keras.layers.Conv1D(16, kernel_size=3, padding="causal", activation="relu")(x)
+    x = keras.layers.BatchNormalization()(x)
+    x = keras.layers.Dropout(cfg["dropout"] * 0.5)(x)
 
-    # Attention
-    if cfg["attention"]:
-        attention = keras.layers.Dense(1, activation="tanh")(x)
-        attention = keras.layers.Flatten()(attention)
-        attention = keras.layers.Activation("softmax")(attention)
-        attention = keras.layers.RepeatVector(cfg["lstm_layers"][1])(attention)
-        attention = keras.layers.Permute([2, 1])(attention)
-        x = keras.layers.Multiply()([x, attention])
-        x = WeightedSum()(x)
-    else:
-        x = x[:, -1, :]
+    # LSTM: captures sequential dependencies
+    x = keras.layers.LSTM(cfg["lstm_layers"][0], return_sequences=True, dropout=cfg["dropout"])(x)
+    x = keras.layers.LSTM(cfg["lstm_layers"][1], return_sequences=False, dropout=cfg["dropout"])(x)
 
     x = keras.layers.Dense(cfg["dense_units"], activation="relu")(x)
     x = keras.layers.Dropout(cfg["dropout"])(x)

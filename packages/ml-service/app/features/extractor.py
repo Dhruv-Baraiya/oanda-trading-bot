@@ -31,7 +31,10 @@ class FeatureExtractor:
         # Group F: Time/Session (7 features) — always present
         time_feat = self._time_features(h1)
 
-        groups = [base, indicators, time_feat]
+        # Group H: Price Action (8 features) — always present
+        price_action = self._price_action_features(h1)
+
+        groups = [base, indicators, time_feat, price_action]
 
         # Group C: M1 Microstructure (8 features) — only if sufficient M1 data
         if m1 is not None and len(m1) > 500:
@@ -151,6 +154,35 @@ class FeatureExtractor:
             if len(prior) >= 2:
                 result.iloc[i, 1] = latest["longRatio"] - prior.iloc[-2]["longRatio"]
             result.iloc[i, 2] = 1.0 if latest["longRatio"] > 0.7 or latest["longRatio"] < 0.3 else 0.0
+
+        return result
+
+    def _price_action_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        result = pd.DataFrame(index=df.index)
+        o, h, l, c = df["open"], df["high"], df["low"], df["close"]
+        body = (c - o).abs()
+        full_range = (h - l).replace(0, np.nan)
+
+        result["body_ratio"] = (body / full_range).fillna(0)
+        result["upper_wick"] = ((h - pd.concat([o, c], axis=1).max(axis=1)) / full_range).fillna(0)
+        result["lower_wick"] = ((pd.concat([o, c], axis=1).min(axis=1) - l) / full_range).fillna(0)
+
+        roll_high = h.rolling(20).max()
+        roll_low = l.rolling(20).min()
+        roll_range = (roll_high - roll_low).replace(0, np.nan)
+        result["dist_to_high"] = ((roll_high - c) / roll_range).fillna(0.5)
+        result["dist_to_low"] = ((c - roll_low) / roll_range).fillna(0.5)
+
+        direction = (c > o).astype(int)
+        streaks = direction.groupby((direction != direction.shift()).cumsum()).cumcount() + 1
+        result["consec_direction"] = streaks * direction.map({1: 1, 0: -1})
+
+        atr = (h - l).rolling(14).mean()
+        atr_pct = atr.rolling(100).rank(pct=True)
+        result["vol_regime"] = atr_pct.fillna(0.5)
+
+        result["gap"] = (o - c.shift(1)) / atr.replace(0, np.nan)
+        result["gap"] = result["gap"].fillna(0).clip(-3, 3)
 
         return result
 
