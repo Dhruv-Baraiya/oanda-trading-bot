@@ -30,17 +30,16 @@ INSTRUMENT_REGISTRY = {
 
 TRAINING_CONFIG = {
     "universal": {
-        "lookback_window": 30,
+        "lookback_window": 20,
         "feature_count": 52,
-        "lstm_layers": [32, 16],
-        "attention": False,
-        "dropout": 0.4,
-        "dense_units": 16,
-        "batch_size": 128,
+        "lstm_layers": [24],
+        "dropout": 0.5,
+        "dense_units": 8,
+        "batch_size": 256,
         "max_epochs": 100,
-        "early_stop_patience": 15,
-        "reduce_lr_patience": 7,
-        "initial_lr": 0.0005,
+        "early_stop_patience": 20,
+        "reduce_lr_patience": 8,
+        "initial_lr": 0.001,
         "loss_weights": {"direction": 1.0, "magnitude": 0.0},
     },
     "specialist": {

@@ -9,7 +9,7 @@ from app.features.extractor import FeatureExtractor
 from app.meta.controller import MetaController
 
 router = APIRouter()
-extractor = FeatureExtractor(lookback=30)
+extractor = FeatureExtractor(lookback=20)
 meta = MetaController()
 
 _universal_model = None

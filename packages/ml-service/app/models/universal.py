@@ -9,20 +9,16 @@ from app.config import TRAINING_CONFIG, MODEL_DIR, MODEL_STORAGE
 def build_universal_model(feature_count: int = 49, lookback: int = 60) -> keras.Model:
     cfg = TRAINING_CONFIG["universal"]
 
+    reg = keras.regularizers.l2(1e-4)
     inputs = keras.Input(shape=(lookback, feature_count), name="candle_input")
 
-    # CNN front-end: captures local patterns (candlestick formations)
-    x = keras.layers.Conv1D(32, kernel_size=3, padding="causal", activation="relu")(inputs)
+    x = keras.layers.LSTM(
+        cfg["lstm_layers"][0], return_sequences=False,
+        dropout=cfg["dropout"], recurrent_dropout=0.2,
+        kernel_regularizer=reg,
+    )(inputs)
     x = keras.layers.BatchNormalization()(x)
-    x = keras.layers.Conv1D(16, kernel_size=3, padding="causal", activation="relu")(x)
-    x = keras.layers.BatchNormalization()(x)
-    x = keras.layers.Dropout(cfg["dropout"] * 0.5)(x)
-
-    # LSTM: captures sequential dependencies
-    x = keras.layers.LSTM(cfg["lstm_layers"][0], return_sequences=True, dropout=cfg["dropout"])(x)
-    x = keras.layers.LSTM(cfg["lstm_layers"][1], return_sequences=False, dropout=cfg["dropout"])(x)
-
-    x = keras.layers.Dense(cfg["dense_units"], activation="relu")(x)
+    x = keras.layers.Dense(cfg["dense_units"], activation="relu", kernel_regularizer=reg)(x)
     x = keras.layers.Dropout(cfg["dropout"])(x)
 
     direction_out = keras.layers.Dense(1, activation="sigmoid", name="direction")(x)
@@ -31,7 +27,7 @@ def build_universal_model(feature_count: int = 49, lookback: int = 60) -> keras.
     model = keras.Model(inputs=inputs, outputs=[direction_out, magnitude_out])
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=cfg["initial_lr"]),
-        loss={"direction": "binary_crossentropy", "magnitude": "mse"},
+        loss={"direction": keras.losses.BinaryCrossentropy(label_smoothing=0.05), "magnitude": "mse"},
         loss_weights=cfg["loss_weights"],
         metrics={"direction": "accuracy"},
     )
