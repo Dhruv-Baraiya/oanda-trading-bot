@@ -137,10 +137,19 @@ async function start() {
     console.warn(`[NewsBlackout] Start failed: ${err.message}`)
   );
 
-  httpServer.listen(PORT, () => {
+  httpServer.listen(PORT, async () => {
     console.log(`Trading bot API running on port ${PORT}`);
     console.log(`WebSocket server ready`);
     console.log(`Account: ${accountId}`);
+
+    try {
+      await dataCollector.start();
+      console.log('[Boot] DataCollector auto-started');
+      await autoTrader.start();
+      console.log('[Boot] AutoTrader auto-started');
+    } catch (err: any) {
+      console.error(`[Boot] Auto-start failed: ${err.message}`);
+    }
   });
 }
 
