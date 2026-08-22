@@ -26,6 +26,8 @@ export class MLClient {
   private baseUrl: string;
   private timeout: number;
   private enabled: boolean;
+  private consecutiveFailures = 0;
+  private suppressedUntil = 0;
 
   constructor(baseUrl?: string, timeout = 5000) {
     this.baseUrl = baseUrl || process.env.ML_SERVICE_URL || 'http://localhost:8000';
@@ -52,6 +54,7 @@ export class MLClient {
     rule_signal?: { direction: string; strategy_name: string };
   }): Promise<MLPrediction | null> {
     if (!this.enabled) return null;
+    if (Date.now() < this.suppressedUntil) return null;
 
     try {
       const controller = new AbortController();
@@ -84,10 +87,18 @@ export class MLClient {
       clearTimeout(timer);
 
       if (!res.ok) {
-        console.error(`[MLClient] ML service error: ${res.status}`);
+        this.consecutiveFailures++;
+        if (this.consecutiveFailures <= 3) {
+          console.error(`[MLClient] ML service error: ${res.status}`);
+        }
+        if (this.consecutiveFailures === 5) {
+          this.suppressedUntil = Date.now() + 10 * 60 * 1000;
+          console.warn(`[MLClient] 5 consecutive failures — suppressing for 10min, falling back to rules-only`);
+        }
         return null;
       }
 
+      this.consecutiveFailures = 0;
       return await res.json() as MLPrediction;
     } catch (err: any) {
       if (err.name === 'AbortError') {
