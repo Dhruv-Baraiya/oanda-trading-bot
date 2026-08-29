@@ -25,7 +25,7 @@ class FeatureExtractor:
         # Group A: Base OHLCV (5 features) — always present
         base = self._base_features(h1)
 
-        # Group B: Technical Indicators (15 features) — always present
+        # Group B: Technical Indicators (12 features) — always present
         indicators = compute_indicators(h1)
 
         # Group F: Time/Session (7 features) — always present
