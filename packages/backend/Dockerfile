@@ -26,7 +26,7 @@ WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-COPY package.json pnpm-workspace.yaml ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/backend/package.json packages/backend/
 
 RUN pnpm install --frozen-lockfile --filter backend --prod
