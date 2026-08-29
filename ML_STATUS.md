@@ -45,6 +45,7 @@
 | v9 | CNN+LSTM(32,16) | 69% | 51.5% | Overfit badly |
 | v10 | LSTM(24)+L2+smooth | 53% | 50.6% | Underfit |
 | LGBM v1 | LightGBM | 58.2% | 51.9% | Raw indicators leak |
+| LGBM v2 | LightGBM | 56.4% | 53.0% | Normalized features, 410K samples, 2 pairs |
 
 ---
 

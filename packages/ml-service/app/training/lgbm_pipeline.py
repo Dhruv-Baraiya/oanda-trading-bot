@@ -62,7 +62,7 @@ class LGBMPipeline:
                 y = directions[valid]
                 dates = features.index[:n][valid]
 
-                print(f"[LGBM] {instrument}/{gran}: {len(df)} candles → {len(X)} valid samples (h={h})")
+                print(f"[LGBM] {instrument}/{gran}: {len(df)} candles -> {len(X)} valid samples (h={h})")
                 all_X.append(X)
                 all_y.append(y)
                 all_dates.append(dates)
