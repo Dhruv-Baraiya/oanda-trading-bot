@@ -96,8 +96,26 @@ export class AutoTrader extends EventEmitter {
     };
   }
 
+  private isForexMarketOpen(): boolean {
+    const now = new Date();
+    const day = now.getUTCDay();
+    const hour = now.getUTCHours();
+    // Forex closed: Friday 21:00 UTC → Sunday 21:00 UTC
+    if (day === 6) return false; // Saturday
+    if (day === 0 && hour < 21) return false; // Sunday before 21:00
+    if (day === 5 && hour >= 21) return false; // Friday after 21:00
+    return true;
+  }
+
   private async evaluate(): Promise<void> {
     try {
+      if (!this.isForexMarketOpen()) {
+        this.lastEvaluation = new Date().toISOString();
+        this.evaluationCount++;
+        this.emit('status', this.getStatus());
+        return;
+      }
+
       const strategies = await StrategyModel.find({ enabled: true }).lean();
       this.activeStrategies = strategies.length;
 

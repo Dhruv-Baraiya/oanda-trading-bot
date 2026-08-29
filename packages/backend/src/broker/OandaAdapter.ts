@@ -196,7 +196,17 @@ export class OandaAdapter implements BrokerAdapter {
     });
 
     const fill = data.orderFillTransaction;
+    const cancel = data.orderCancelTransaction;
+    const reject = data.orderRejectTransaction;
     const created = data.orderCreateTransaction;
+
+    if (reject) {
+      throw new Error(`Order rejected: ${reject.rejectReason ?? 'unknown'}`);
+    }
+
+    if (cancel) {
+      throw new Error(`Order cancelled: ${cancel.reason ?? 'unknown'}`);
+    }
 
     if (fill) {
       return {
