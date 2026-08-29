@@ -1,3 +1,7 @@
 packages:
   - 'packages/*'
-approveBuilds: esbuild workerd sharp msgpackr-extract
+onlyBuiltDependencies:
+  - esbuild
+  - workerd
+  - sharp
+  - msgpackr-extract
