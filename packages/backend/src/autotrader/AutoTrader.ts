@@ -108,8 +108,10 @@ export class AutoTrader extends EventEmitter {
         return;
       }
 
+      const mlInitiatedThisCycle = new Set<string>();
+
       for (const strategy of strategies) {
-        await this.evaluateStrategy(strategy);
+        await this.evaluateStrategy(strategy, mlInitiatedThisCycle);
       }
 
       this.lastEvaluation = new Date().toISOString();
@@ -122,7 +124,7 @@ export class AutoTrader extends EventEmitter {
     }
   }
 
-  private async evaluateStrategy(strategy: any): Promise<void> {
+  private async evaluateStrategy(strategy: any, mlInitiatedThisCycle: Set<string>): Promise<void> {
     const strategyId = strategy._id.toString();
     const strategyName = strategy.name;
 
@@ -162,8 +164,8 @@ export class AutoTrader extends EventEmitter {
       }
 
       if (!signal) {
-        // No rule signal — check if ML wants to initiate a trade
-        if (this.mlClient.isEnabled()) {
+        // No rule signal — check if ML wants to initiate a trade (once per instrument per cycle)
+        if (this.mlClient.isEnabled() && !mlInitiatedThisCycle.has(strategy.instrument)) {
           const prediction = await this.mlClient.predict({
             instrument: strategy.instrument,
             candles_h1: candles.slice(-65),
@@ -209,6 +211,7 @@ export class AutoTrader extends EventEmitter {
               acted: true,
             });
 
+            mlInitiatedThisCycle.add(strategy.instrument);
             await this.handleEntry(strategy, aiSignal, current, prediction.meta.size_factor || 0.5);
             return;
           }
