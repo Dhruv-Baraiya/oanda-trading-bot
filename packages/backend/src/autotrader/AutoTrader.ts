@@ -194,6 +194,7 @@ export class AutoTrader extends EventEmitter {
 
           if (prediction?.meta?.action === 'AI_TRADE' && prediction.meta.direction) {
             const aiDirection = prediction.meta.direction;
+            mlInitiatedThisCycle.add(strategy.instrument);
 
             await this.log('SIGNAL_GENERATED', {
               strategyId, strategyName,
@@ -229,7 +230,6 @@ export class AutoTrader extends EventEmitter {
               acted: true,
             });
 
-            mlInitiatedThisCycle.add(strategy.instrument);
             await this.handleEntry(strategy, aiSignal, current, prediction.meta.size_factor || 0.5);
             return;
           }
