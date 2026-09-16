@@ -1,42 +1,50 @@
-# ML Model Improvement — Status (2026-08-22)
+# ML Model Improvement — Status (2026-08-29)
 
 ## Current State
-- **AutoTrader**: Running, 8 strategies, ML enabled, 0 errors
-- **ML Service**: Live on Render, models loaded from MongoDB
-- **Latest commit**: `ec8be38` — LightGBM implementation
+- **AutoTrader**: Running on Railway, 8 strategies, ML enabled
+- **Backend**: `oanda-trading-bot-production-17fa.up.railway.app`
+- **ML Service**: `captivating-dream-production-8a42.up.railway.app`
+- **Active Model**: LightGBM v2 (universal-lgbm-latest), 45 features, 53.0% val acc
 
 ---
 
 ## DONE
 
-### Binary Classification Switch (v8)
-- Switched from 3-class (UP/DOWN/FLAT) to binary (UP/DOWN)
-- Simplified LSTM(32,16), dropout 0.4, lookback 30
-- **Result**: 53.4% val accuracy (best LSTM so far)
+### Hosting Migration (Render → Railway)
+- Backend + ML Service deployed on Railway (Render free tier exhausted)
+- Dockerfiles for both services, auto-deploy on git push
+- UptimeRobot updated to Railway URL
 
-### Predict Endpoint Fix
-- Removed FLAT key reference causing KeyError/422
-- Fixed lookback mismatch (extractor vs model)
-- Updated MLClient.ts TypeScript interface
+### Indicator Normalization Fix
+- Removed all raw price-level features from `compute_indicators()`
+- Now returns 12 scale-invariant features:
+  `atr_pct, rsi, macd_norm, macd_signal_norm, macd_hist_norm, bb_percentB, bb_width, ema_short_dist, ema_mid_dist, ema_long_dist, ema_spread, rsi_divergence`
 
-### Noise Label Filter
-- Exclude training samples where price moved < 0.3 ATR
-- Removes ~4,300 coin-flip samples from 33K → 29K useful samples
+### LightGBM v2 Trained & Deployed
+- 409K samples from EUR_USD + GBP_USD (H1 + M15)
+- 45 normalized features, no raw price leakage
+- Top features: ret_std_50, ema_spread, macd_signal_norm, bb_width
+- Saved to MongoDB as universal-lgbm-v2 + universal-lgbm-latest
 
-### Price Action Features (8 new)
-- body_ratio, upper/lower wicks, dist_to_high/low
-- consecutive direction count, volatility regime, gap size
+### Signal Spam Fix
+- ML was firing on all 8 strategies per cycle (up to 8 duplicate orders/min)
+- Added `mlInitiatedThisCycle` Set — max 1 ML-initiated trade per instrument per cycle
 
-### LightGBM Implementation
-- `app/models/lgbm_model.py` — train/save/load via MongoDB
-- `app/features/flat_extractor.py` — 47 flat features per candle
-- `app/training/lgbm_pipeline.py` — multi-pair, multi-granularity support
-- `app/routes/predict.py` — LightGBM primary, LSTM fallback
-- `requirements.txt` — added lightgbm, joblib
+### Ghost Order Fix
+- OANDA cancelled orders (market closed / FOK) were logged as ORDER_PLACED with price=0
+- Now throws on `orderCancelTransaction`/`orderRejectTransaction` → logged as ORDER_REJECTED
 
-### Data Backfill Started
-- **GBP_USD H1**: DONE (47,568 candles)
-- **GBP_USD M15**: RUNNING (queued, will finish in ~30 min)
+### Market Hours Guard
+- Bot was evaluating strategies on weekends, sending unfillable orders
+- Added `isForexMarketOpen()` — skips evaluation Fri 21:00 → Sun 21:00 UTC
+
+### Data Backfills
+| Pair | H1 | M15 |
+|------|-----|-----|
+| EUR_USD | 33,952 | 189,755 |
+| GBP_USD | 47,558 | 190,176 |
+| USD_JPY | 47,701 | 140,000 (partial — D1 limit hit) |
+| USD_CHF | **PENDING** | **PENDING** |
 
 ### Training Attempts Summary
 | Version | Model | Train Acc | Val Acc | Notes |
@@ -49,78 +57,57 @@
 
 ---
 
-## PENDING (Next Session)
+## PENDING
 
-### 1. Fix Indicator Normalization (DONE)
-All raw price-level features removed from `compute_indicators()`. Now returns 12 scale-invariant features:
-`atr_pct, rsi, macd_norm, macd_signal_norm, macd_hist_norm, bb_percentB, bb_width, ema_short_dist, ema_mid_dist, ema_long_dist, ema_spread, rsi_divergence`
+### 1. Complete Backfills (D1 Worker daily limit reset needed)
+After midnight UTC, retry:
+- USD_JPY M15: remaining ~50K candles (from where it left off)
+- USD_CHF H1: full backfill (~47K candles)
+- USD_CHF M15: full backfill (~190K candles)
 
-### 2. Queue Remaining Backfills
-After GBP_USD M15 finishes, queue (one at a time via background endpoint):
-```
-POST /api/datacollector/backfill/background
-- USD_JPY H1: {"instrument":"USD_JPY","granularity":"H1","from":"2019-01-01","to":"2026-08-22"}
-- USD_JPY M15: {"instrument":"USD_JPY","granularity":"M15","from":"2019-01-01","to":"2026-08-22"}
-- USD_CHF H1: {"instrument":"USD_CHF","granularity":"H1","from":"2019-01-01","to":"2026-08-22"}
-- USD_CHF M15: {"instrument":"USD_CHF","granularity":"M15","from":"2019-01-01","to":"2026-08-22"}
-```
-Check status: `GET /api/datacollector/backfill/status`
-
-### 3. Retrain LightGBM with Fixed Features + All Pairs
-After indicators fixed and all backfills done:
+### 2. Retrain LightGBM v3 with All 4 Pairs
+After backfills complete (~800K+ samples):
 ```bash
-cd /mnt/c/Users/barai/OneDrive/Desktop/project/Trading/oanda-trading-bot/packages/ml-service
+cd packages/ml-service
 python -c "
 from app.training.lgbm_pipeline import LGBMPipeline
 p = LGBMPipeline()
 r = p.train_universal(
     instruments=['EUR_USD', 'GBP_USD', 'USD_JPY', 'USD_CHF'],
     granularities=['H1', 'M15'],
-    version='v2',
+    version='v3',
 )
 print(r)
 "
 ```
-Expected: 55-58% val accuracy with ~800K+ samples and clean features.
 
-### 4. Deploy Updated ML Service
-After training with good accuracy:
-```bash
-git add . && git commit && git push  # triggers Render auto-deploy
-```
-
-### 5. GPU Training (Optional)
-GPU never worked in training — LD_LIBRARY_PATH export runs but CUDA libs not found.
-Fix: run `export LD_LIBRARY_PATH=...` BEFORE the training command in same shell.
-Not critical — LightGBM trains in seconds on CPU anyway.
-
-### 6. Other Pending Items
+### 3. Other Pending Items
 - SendGrid sender verification for email alerts
-- UptimeRobot still pinging backend (keeps Render alive)
-- Monitor bot trading when market opens Sunday night
+- Monitor bot trading when market opens Sunday 21:00 UTC
 
 ---
 
 ## Architecture
 
 ```
-Backend (Node) → POST /predict → ML Service (Python/FastAPI)
-                                    ├── LightGBM (primary, ~1ms inference)
-                                    ├── LSTM (fallback, ~500ms inference)
-                                    └── Specialist LSTM (sizing/confidence)
-                                         ↓
-                                    MetaController combines:
-                                    - Rule signal direction
-                                    - LightGBM UP probability
-                                    - Specialist confidence
-                                         ↓
-                                    Action: TRADE / SKIP / AI_TRADE / NO_TRADE
+Backend (Node/Railway) → POST /predict → ML Service (Python/Railway)
+                                          ├── LightGBM (primary, ~1ms)
+                                          ├── LSTM (fallback, ~500ms)
+                                          └── Specialist LSTM (EUR_USD)
+                                               ↓
+                                          MetaController:
+                                          - Rule signal direction
+                                          - LightGBM UP probability
+                                          - Specialist confidence
+                                               ↓
+                                          Action: TRADE / SKIP / AI_TRADE / NO_TRADE
 ```
 
 ## Key Files
 - `app/features/indicators.py` — 12 normalized features (no raw prices)
-- `app/features/flat_extractor.py` — LightGBM feature extraction
+- `app/features/flat_extractor.py` — LightGBM feature extraction (45 features)
 - `app/models/lgbm_model.py` — LightGBM train/save/load
 - `app/training/lgbm_pipeline.py` — multi-pair training
 - `app/routes/predict.py` — prediction endpoint (LGBM primary)
-- `app/config.py` — model hyperparameters
+- `packages/backend/src/autotrader/AutoTrader.ts` — signal spam fix + market hours
+- `packages/backend/src/broker/OandaAdapter.ts` — cancelled order detection

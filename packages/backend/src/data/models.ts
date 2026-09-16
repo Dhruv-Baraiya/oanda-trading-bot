@@ -39,6 +39,7 @@ export interface ITradeDoc extends Document {
   pl?: number;
   state: 'OPEN' | 'CLOSED';
   signals: string[];
+  strategyId?: string;
   notes?: string;
 }
 
@@ -55,6 +56,7 @@ const tradeSchema = new Schema<ITradeDoc>({
   pl: Number,
   state: { type: String, enum: ['OPEN', 'CLOSED'], default: 'OPEN', index: true },
   signals: [String],
+  strategyId: { type: String, index: true },
   notes: String,
 }, { timestamps: true });
 

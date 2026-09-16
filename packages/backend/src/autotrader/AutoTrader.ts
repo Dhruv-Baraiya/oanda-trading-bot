@@ -355,6 +355,15 @@ export class AutoTrader extends EventEmitter {
             }
 
             mlSizeFactor = prediction.meta.size_factor || 1.0;
+          } else {
+            await this.log('ORDER_REJECTED', {
+              strategyId, strategyName,
+              instrument: strategy.instrument,
+              direction: signal.direction,
+              message: 'ML enabled but prediction failed — skipping trade',
+            });
+            this.tradesRejected++;
+            return;
           }
         }
 
@@ -432,6 +441,7 @@ export class AutoTrader extends EventEmitter {
           openTime: new Date(order.timestamp),
           state: 'OPEN',
           signals: [strategy.name],
+          strategyId: strategy._id.toString(),
         }).catch(err => console.error('[AutoTrader] Failed to save trade:', err.message));
       }
 
@@ -450,9 +460,17 @@ export class AutoTrader extends EventEmitter {
 
   private async handleExit(strategy: any, signal: any): Promise<void> {
     try {
+      const ownedTrades = await TradeModel.find({
+        instrument: strategy.instrument,
+        state: 'OPEN',
+        strategyId: strategy._id.toString(),
+      }).lean();
+      const ownedTradeIds = new Set(ownedTrades.map(t => t.tradeId));
+
       const trades = await this.broker.getOpenTrades();
       const matching = trades.filter(t =>
         t.instrument === strategy.instrument &&
+        ownedTradeIds.has(t.tradeId) &&
         ((signal.direction === 'EXIT_LONG' && t.units > 0) ||
          (signal.direction === 'EXIT_SHORT' && t.units < 0))
       );
