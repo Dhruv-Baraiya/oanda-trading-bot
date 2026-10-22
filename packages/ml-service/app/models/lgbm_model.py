@@ -7,27 +7,30 @@ import joblib
 from app.config import MODEL_DIR, MODEL_STORAGE
 
 
+DEFAULT_PARAMS = {
+    "objective": "binary",
+    "metric": "binary_logloss",
+    "boosting_type": "gbdt",
+    "num_leaves": 31,
+    "max_depth": 6,
+    "learning_rate": 0.05,
+    "n_estimators": 500,
+    "min_child_samples": 50,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_alpha": 0.1,
+    "reg_lambda": 0.1,
+    "random_state": 42,
+    "verbose": -1,
+    "is_unbalance": True,
+}
+
+
 def build_lgbm_model(params: dict | None = None) -> lgb.LGBMClassifier:
-    default_params = {
-        "objective": "binary",
-        "metric": "binary_logloss",
-        "boosting_type": "gbdt",
-        "num_leaves": 31,
-        "max_depth": 6,
-        "learning_rate": 0.05,
-        "n_estimators": 500,
-        "min_child_samples": 50,
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "reg_alpha": 0.1,
-        "reg_lambda": 0.1,
-        "random_state": 42,
-        "verbose": -1,
-        "is_unbalance": True,
-    }
+    p = DEFAULT_PARAMS.copy()
     if params:
-        default_params.update(params)
-    return lgb.LGBMClassifier(**default_params)
+        p.update(params)
+    return lgb.LGBMClassifier(**p)
 
 
 def train_lgbm(
@@ -66,6 +69,46 @@ def train_lgbm(
         "top_features": sorted(importance.items(), key=lambda x: -x[1])[:10],
     }
     return model, metrics
+
+
+def tune_lgbm(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    n_trials: int = 50,
+) -> dict:
+    import optuna
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    def objective(trial):
+        params = {
+            "num_leaves": trial.suggest_int("num_leaves", 15, 127),
+            "max_depth": trial.suggest_int("max_depth", 3, 12),
+            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
+            "n_estimators": 1000,
+            "min_child_samples": trial.suggest_int("min_child_samples", 20, 200),
+            "subsample": trial.suggest_float("subsample", 0.5, 1.0),
+            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.4, 1.0),
+            "reg_alpha": trial.suggest_float("reg_alpha", 1e-3, 10.0, log=True),
+            "reg_lambda": trial.suggest_float("reg_lambda", 1e-3, 10.0, log=True),
+            "min_split_gain": trial.suggest_float("min_split_gain", 0.0, 1.0),
+        }
+        model = build_lgbm_model(params)
+        model.fit(
+            X_train, y_train,
+            eval_set=[(X_val, y_val)],
+            callbacks=[lgb.early_stopping(30, verbose=False), lgb.log_evaluation(0)],
+        )
+        preds = model.predict_proba(X_val)[:, 1]
+        return np.mean((preds > 0.5).astype(int) == y_val)
+
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+
+    print(f"[Optuna] Best val accuracy: {study.best_value:.4f}")
+    print(f"[Optuna] Best params: {study.best_params}")
+    return study.best_params
 
 
 def save_lgbm_model(model: lgb.LGBMClassifier, name: str, version: str, meta: dict):

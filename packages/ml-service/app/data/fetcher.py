@@ -1,5 +1,6 @@
 import pandas as pd
 from datetime import datetime
+from app.data.sqlite_client import fetch_candles_sqlite
 from app.data.d1_client import fetch_candles_d1
 from app.data.mongo_client import get_collection
 
@@ -11,6 +12,9 @@ def fetch_candles(
     end: datetime | None = None,
     limit: int | None = None,
 ) -> pd.DataFrame:
+    df = fetch_candles_sqlite(instrument, granularity, start, end, limit)
+    if not df.empty:
+        return df
     return fetch_candles_d1(instrument, granularity, start, end, limit)
 
 

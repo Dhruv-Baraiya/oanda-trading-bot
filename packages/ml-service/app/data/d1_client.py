@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 import pandas as pd
 from datetime import datetime
@@ -9,7 +10,22 @@ D1_API_KEY = os.getenv("D1_API_KEY", "CHANGE_ME_TO_A_SECURE_KEY")
 HEADERS = {
     "Content-Type": "application/json",
     "X-API-Key": D1_API_KEY,
+    "Connection": "close",
 }
+
+
+def _d1_get(url: str, params: dict, timeout: int = 60):
+    for attempt in range(4):
+        try:
+            resp = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except requests.exceptions.RequestException as e:
+            if attempt == 3:
+                raise
+            wait = 2 ** attempt
+            print(f"[D1] Retry {attempt+1}/3 after {wait}s: {e}")
+            time.sleep(wait)
 
 
 def fetch_candles_d1(
@@ -19,31 +35,41 @@ def fetch_candles_d1(
     end: datetime | None = None,
     limit: int | None = None,
 ) -> pd.DataFrame:
-    PAGE_SIZE = 10000
-    params: dict = {"instrument": instrument, "granularity": granularity, "limit": str(PAGE_SIZE)}
-    if start:
-        params["from"] = start.isoformat()
-    if end:
-        params["to"] = end.isoformat()
-    if limit:
-        params["limit"] = str(limit)
+    PAGE_SIZE = 5000
+    cursor_from = start.isoformat() if start else None
+    to_str = end.isoformat() if end else None
 
     all_records: list = []
-    offset = 0
 
     while True:
-        params["offset"] = str(offset)
-        resp = requests.get(f"{D1_WORKER_URL}/candles", params=params, headers=HEADERS, timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
-        records = data.get("candles", [])
+        params: dict = {
+            "instrument": instrument,
+            "granularity": granularity,
+            "limit": str(limit or PAGE_SIZE),
+            "offset": "0",
+        }
+        if cursor_from:
+            params["from"] = cursor_from
+        if to_str:
+            params["to"] = to_str
+
+        resp = _d1_get(f"{D1_WORKER_URL}/candles", params)
+        records = resp.json().get("candles", [])
         if not records:
             break
-        all_records.extend(records)
-        if limit or len(records) < PAGE_SIZE:
+
+        if all_records and records[0]["timestamp"] == all_records[-1]["timestamp"]:
+            records = records[1:]
+        if not records:
             break
-        offset += PAGE_SIZE
+
+        all_records.extend(records)
+        if limit or len(records) < (limit or PAGE_SIZE):
+            break
+
+        cursor_from = records[-1]["timestamp"]
         print(f"[D1] Fetched {len(all_records)} {granularity} candles so far...")
+        time.sleep(0.2)
 
     if not all_records:
         return pd.DataFrame()

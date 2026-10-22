@@ -59,4 +59,45 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     rsi_highs = result["rsi"].rolling(14).max() == result["rsi"]
     result["rsi_divergence"] = (price_highs & ~rsi_highs).astype(float)
 
+    # ADX(14) — trend strength
+    plus_dm = df["high"].diff()
+    minus_dm = -df["low"].diff()
+    plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0)
+    minus_dm = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0)
+    plus_di = 100 * (plus_dm.ewm(span=14).mean() / atr_safe)
+    minus_di = 100 * (minus_dm.ewm(span=14).mean() / atr_safe)
+    dx = (100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan))
+    result["adx"] = dx.ewm(span=14).mean()
+    result["di_spread"] = (plus_di - minus_di) / 100
+
+    # Stochastic %K/%D (14, 3)
+    lowest_14 = df["low"].rolling(14).min()
+    highest_14 = df["high"].rolling(14).max()
+    stoch_range = (highest_14 - lowest_14).replace(0, np.nan)
+    result["stoch_k"] = (close - lowest_14) / stoch_range
+    result["stoch_d"] = result["stoch_k"].rolling(3).mean()
+
+    # Volatility regime — ATR ratio and BB squeeze
+    atr_50 = tr.rolling(50).mean().replace(0, np.nan)
+    result["atr_ratio"] = atr / atr_50
+    result["bb_squeeze"] = (bb_range / close) / result["atr_pct"].replace(0, np.nan)
+
+    # Rate of change
+    result["roc_5"] = close.pct_change(5)
+    result["roc_10"] = close.pct_change(10)
+    result["roc_20"] = close.pct_change(20)
+
+    # EMA alignment score: +3 if perfectly bullish ordered, -3 if bearish
+    ema_align = (
+        (ema_short > ema_mid).astype(float) +
+        (ema_mid > ema_long).astype(float) +
+        (close > ema_short).astype(float)
+    )
+    result["ema_alignment"] = ema_align - 1.5
+
+    # OBV trend (normalized by rolling std)
+    obv = (np.sign(close.diff()) * df["volume"]).cumsum()
+    obv_std = obv.rolling(50).std().replace(0, np.nan)
+    result["obv_trend"] = (obv - obv.rolling(20).mean()) / obv_std
+
     return result

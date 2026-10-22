@@ -13,6 +13,8 @@ class FlatFeatureExtractor:
             self._lagged_returns(df),
             self._rolling_stats(df),
             self._price_action(df),
+            self._mean_reversion(df),
+            self._multi_bar_patterns(df),
             self._time_features(df),
         ]
         result = pd.concat(parts, axis=1)
@@ -66,6 +68,49 @@ class FlatFeatureExtractor:
         r["consec_dir"] = streaks * direction.map({1: 1, 0: -1})
 
         r["gap"] = ((o - c.shift(1)) / (h - l).rolling(14).mean().replace(0, np.nan)).fillna(0).clip(-3, 3)
+
+        return r
+
+    def _mean_reversion(self, df: pd.DataFrame) -> pd.DataFrame:
+        r = pd.DataFrame(index=df.index)
+        close = df["close"]
+
+        for w in [20, 50]:
+            mean = close.rolling(w).mean()
+            std = close.rolling(w).std().replace(0, np.nan)
+            r[f"zscore_{w}"] = (close - mean) / std
+
+        atr = (df["high"] - df["low"]).rolling(14).mean().replace(0, np.nan)
+        sma50 = close.rolling(50).mean()
+        r["overextension"] = (close - sma50) / atr
+
+        r["price_vs_vwap"] = (close - (close * df["volume"]).rolling(20).sum()
+                              / df["volume"].rolling(20).sum().replace(0, np.nan)) / atr
+        return r
+
+    def _multi_bar_patterns(self, df: pd.DataFrame) -> pd.DataFrame:
+        r = pd.DataFrame(index=df.index)
+        o, h, l, c = df["open"], df["high"], df["low"], df["close"]
+
+        r["inside_bar"] = ((h < h.shift(1)) & (l > l.shift(1))).astype(float)
+        r["engulfing_bull"] = ((c > o) & (c.shift(1) < o.shift(1)) &
+                               (c > o.shift(1)) & (o < c.shift(1))).astype(float)
+        r["engulfing_bear"] = ((c < o) & (c.shift(1) > o.shift(1)) &
+                               (c < o.shift(1)) & (o > c.shift(1))).astype(float)
+
+        hh = (h > h.shift(1)).astype(int)
+        ll = (l < l.shift(1)).astype(int)
+        r["hh_count"] = hh.rolling(5).sum()
+        r["ll_count"] = ll.rolling(5).sum()
+
+        swing_high_dist = h.rolling(20).max()
+        swing_low_dist = l.rolling(20).min()
+        atr = (h - l).rolling(14).mean().replace(0, np.nan)
+        r["dist_swing_high"] = (swing_high_dist - c) / atr
+        r["dist_swing_low"] = (c - swing_low_dist) / atr
+
+        r["vol_spike"] = df["volume"] / df["volume"].rolling(20).mean().replace(0, np.nan)
+        r["vol_trend"] = df["volume"].rolling(5).mean() / df["volume"].rolling(20).mean().replace(0, np.nan)
 
         return r
 
